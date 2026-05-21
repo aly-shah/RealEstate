@@ -151,7 +151,7 @@ export default async function ActivityPage({
         <div className="space-y-6">
           {[...groups.entries()].map(([k, items]) => (
             <section key={k} className="surface overflow-hidden">
-              <header className="sticky top-16 z-10 flex items-center justify-between border-b border-line bg-paper/95 px-5 py-2.5 backdrop-blur">
+              <header className="flex items-center justify-between border-b border-line bg-subtle px-5 py-2.5">
                 <h3 className="text-sm font-semibold text-ink">{dayLabel(k)}</h3>
                 <span className="text-xs text-muted">{items.length} action{items.length === 1 ? "" : "s"}</span>
               </header>
