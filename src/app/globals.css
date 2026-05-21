@@ -1,0 +1,108 @@
+@import "tailwindcss";
+
+/*
+  promptzer — enterprise whitish design system.
+  Light, layered whites · soft borders · professional blue accent · gold used
+  sparingly for money/closed states. Token NAMES are kept stable so the whole
+  app re-themes from here.
+*/
+@theme {
+  /* Accent — professional blue (actions, links, focus) */
+  --color-accent: #2c5f8a;
+  --color-accent-soft: #234c70;
+  --color-accent-wash: #eaf1f7;
+  --color-accent-line: #d6e2ec;
+
+  /* Gold — used sparingly (commission, closed/sold) */
+  --color-gold: #c9a03d;
+  --color-gold-wash: #f7f1e2;
+
+  /* Text */
+  --color-ink: #1a1f36; /* primary / near-black */
+  --color-ink-soft: #2a2f45;
+  --color-slate: #5a6a7e; /* secondary */
+  --color-muted: #8a99ae; /* tertiary / placeholders */
+
+  /* Surfaces & borders */
+  --color-paper: #ffffff;
+  --color-canvas: #f8f9fc;
+  --color-subtle: #f2f4f8;
+  --color-line: #e2e6ec;
+  --color-line-soft: #eef1f5;
+
+  /* Status — soft, professional */
+  --color-ok: #2b7e5c;
+  --color-ok-bg: #e8f3ee;
+  --color-warn: #c0842c;
+  --color-warn-bg: #f7f0e2;
+  --color-danger: #b91c1c;
+  --color-danger-bg: #fbeded;
+
+  --font-sans: var(--font-inter), -apple-system, BlinkMacSystemFont, "Segoe UI",
+    Roboto, Helvetica, Arial, sans-serif;
+
+  /* Soft, layered shadows — depth without darkness */
+  --shadow-card: 0 1px 2px rgba(16, 24, 40, 0.04), 0 1px 3px rgba(16, 24, 40, 0.04);
+  --shadow-pop: 0 10px 24px -8px rgba(16, 24, 40, 0.12), 0 4px 8px rgba(16, 24, 40, 0.04);
+}
+
+html {
+  scroll-behavior: smooth;
+  --sidebar-w: 16rem;
+}
+html.sidebar-collapsed {
+  --sidebar-w: 4.75rem;
+}
+html.sidebar-collapsed .nav-label {
+  display: none;
+}
+
+body {
+  background: var(--color-canvas);
+  color: var(--color-ink-soft);
+  font-family: var(--font-sans);
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  -webkit-font-smoothing: antialiased;
+  line-height: 1.55;
+}
+
+@layer components {
+  .surface {
+    @apply rounded-xl border border-line bg-paper;
+    box-shadow: var(--shadow-card);
+  }
+
+  .field {
+    @apply w-full rounded-lg border border-line bg-white px-3 py-2 text-sm text-ink
+      outline-none transition placeholder:text-muted
+      focus:border-accent focus:ring-4 focus:ring-accent/10;
+  }
+
+  .label {
+    @apply mb-1.5 block text-sm font-medium text-slate;
+  }
+
+  .btn,
+  .btn-primary,
+  .btn-accent,
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium
+      transition focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent/15
+      disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  /* Primary + accent CTAs → professional blue */
+  .btn-primary,
+  .btn-accent {
+    @apply bg-accent text-white hover:bg-accent-soft;
+    box-shadow: var(--shadow-card);
+  }
+
+  .btn-ghost {
+    @apply border border-line bg-white text-slate hover:border-accent/40 hover:text-accent;
+  }
+
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs font-medium;
+  }
+}
