@@ -158,21 +158,28 @@ export default async function ActivityPage({
               <ul className="divide-y divide-line-soft">
                 {items.map((l) => {
                   const meta = actionMeta(l.action);
+                  // Drop the redundant entity prefix from the action ("deal.created" → "created").
+                  const verb = humanize(l.action.includes(".") ? l.action.split(".").slice(1).join(".") : l.action);
                   return (
                     <li key={l.id} className="flex items-start gap-3 px-5 py-3 transition hover:bg-line-soft/40">
                       <span className={`mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-full ${dotClass(meta.tone)}`} aria-hidden>
                         <span className="text-sm font-semibold">{meta.icon}</span>
                       </span>
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm text-ink">{l.summary}</p>
-                        <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted">
-                          <span>{l.user?.name ?? "System"}</span>
-                          <span>·</span>
-                          <Badge tone="neutral">{humanize(l.entityType)}</Badge>
-                          <Badge tone="neutral">{l.action}</Badge>
-                          <span>·</span>
-                          <time title={fmtDateTime(l.createdAt)}>{relative(l.createdAt)}</time>
+                      <div className="flex min-w-0 flex-1 flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+                        <div className="min-w-0">
+                          <p className="text-sm text-ink">{l.summary}</p>
+                          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
+                            <span className="font-medium text-slate">{l.user?.name ?? "System"}</span>
+                            <Badge tone="neutral">{humanize(l.entityType)}</Badge>
+                            <span className="text-slate">{verb}</span>
+                          </div>
                         </div>
+                        <time
+                          title={fmtDateTime(l.createdAt)}
+                          className="shrink-0 text-xs text-muted"
+                        >
+                          {relative(l.createdAt)}
+                        </time>
                       </div>
                     </li>
                   );
