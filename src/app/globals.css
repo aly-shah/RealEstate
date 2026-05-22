@@ -39,8 +39,8 @@
 
   --font-sans: var(--font-inter), -apple-system, BlinkMacSystemFont, "Segoe UI",
     Roboto, Helvetica, Arial, sans-serif;
-  --font-urdu: var(--font-urdu), "Noto Nastaliq Urdu", "Jameel Noori Nastaleeq",
-    "Urdu Typesetting", serif;
+  --font-urdu: var(--font-urdu), "Noto Sans Arabic", "Segoe UI", Tahoma,
+    Arial, sans-serif;
 
   /* Soft, layered shadows — depth without darkness */
   --shadow-card: 0 1px 2px rgba(15, 23, 42, 0.04), 0 1px 2px rgba(15, 23, 42, 0.03);
@@ -85,10 +85,10 @@ body {
   line-height: 1.55;
 }
 
-/* Urdu typography — use Nastaliq for any text inside an RTL document. */
+/* Urdu typography — Noto Sans Arabic for any text inside an RTL document. */
 [dir="rtl"] body {
   font-family: var(--font-urdu);
-  line-height: 1.9;
+  line-height: 1.65;
 }
 
 /* Inside RTL keep Latin alphanumerics (emails, prices, dates) crisp in Inter
