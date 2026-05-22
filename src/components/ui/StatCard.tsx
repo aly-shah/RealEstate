@@ -9,25 +9,44 @@ interface StatCardProps {
 
 const MARKER: Record<NonNullable<StatCardProps["tone"]>, string> = {
   default: "bg-line",
-  ink: "bg-accent",
-  accent: "bg-accent",
-  gold: "bg-gold",
+  ink: "bg-ink",
+  accent: "bg-accent brand-gradient",
+  gold: "bg-[color:var(--color-gold)]",
   ok: "bg-ok",
   danger: "bg-danger",
 };
 
+const ICON_TINT: Record<NonNullable<StatCardProps["tone"]>, string> = {
+  default: "bg-subtle text-slate",
+  ink: "bg-ink/5 text-ink",
+  accent: "bg-accent-wash text-accent",
+  gold: "bg-gold-wash text-[color:var(--color-gold)]",
+  ok: "bg-ok-bg text-ok",
+  danger: "bg-danger-bg text-danger",
+};
+
 export function StatCard({ label, value, sub, tone = "default", icon }: StatCardProps) {
   return (
-    <div className="surface p-5 transition hover:shadow-[var(--shadow-pop)]">
-      <div className="flex items-center justify-between">
+    <div className="surface group relative overflow-hidden p-5 transition hover:-translate-y-0.5 hover:shadow-[var(--shadow-pop)]">
+      <span
+        className={`absolute inset-x-0 top-0 h-[3px] origin-left scale-x-0 transition-transform duration-500 group-hover:scale-x-100 ${MARKER[tone]}`}
+        aria-hidden
+      />
+      <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
-          <span className={`h-2.5 w-2.5 rounded-full ${MARKER[tone]}`} />
-          <p className="text-xs font-medium uppercase tracking-wide text-muted">{label}</p>
+          <span className={`h-2 w-2 rounded-full ${MARKER[tone]}`} />
+          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted">{label}</p>
         </div>
-        {icon && <span className="text-base text-muted">{icon}</span>}
+        {icon && (
+          <span className={`grid h-8 w-8 place-items-center rounded-lg text-base ${ICON_TINT[tone]}`}>
+            {icon}
+          </span>
+        )}
       </div>
-      <p className="mt-3 text-2xl font-semibold tracking-tight text-ink">{value}</p>
-      {sub && <p className="mt-1 text-xs text-slate">{sub}</p>}
+      <p className="mt-3 text-[1.65rem] font-semibold leading-none tracking-tight text-ink">
+        {value}
+      </p>
+      {sub && <p className="mt-2 text-xs text-slate">{sub}</p>}
     </div>
   );
 }

@@ -4,11 +4,11 @@ type Tone = "neutral" | "ok" | "warn" | "danger" | "ink" | "gold" | "accent";
 
 const TONE_CLASS: Record<Tone, string> = {
   neutral: "border-line bg-line-soft text-slate",
-  ok: "border-ok/30 bg-ok-bg text-ok",
-  warn: "border-warn/30 bg-warn-bg text-warn",
-  danger: "border-danger/30 bg-danger-bg text-danger",
+  ok: "border-ok/25 bg-ok-bg text-ok",
+  warn: "border-warn/25 bg-warn-bg text-warn",
+  danger: "border-danger/25 bg-danger-bg text-danger",
   accent: "border-accent/25 bg-accent-wash text-accent",
-  gold: "border-gold/35 bg-gold-wash text-[color:var(--color-gold)]",
+  gold: "border-gold/30 bg-gold-wash text-[color:var(--color-gold)]",
   ink: "border-ink bg-ink text-white",
 };
 
@@ -70,5 +70,28 @@ export function Badge({ children, tone = "neutral" }: BadgeProps) {
 
 /** Status badge that auto-colours a known status enum value. */
 export function StatusBadge({ status }: { status: string }) {
-  return <Badge tone={STATUS_TONE[status] ?? "neutral"}>{humanize(status)}</Badge>;
+  const tone = STATUS_TONE[status] ?? "neutral";
+  return (
+    <Badge tone={tone}>
+      <span
+        className={`h-1.5 w-1.5 rounded-full ${
+          tone === "ok"
+            ? "bg-ok"
+            : tone === "warn"
+              ? "bg-warn"
+              : tone === "danger"
+                ? "bg-danger"
+                : tone === "accent"
+                  ? "bg-accent"
+                  : tone === "gold"
+                    ? "bg-[color:var(--color-gold)]"
+                    : tone === "ink"
+                      ? "bg-white"
+                      : "bg-muted"
+        }`}
+        aria-hidden
+      />
+      {humanize(status)}
+    </Badge>
+  );
 }

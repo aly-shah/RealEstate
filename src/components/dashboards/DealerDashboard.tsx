@@ -5,6 +5,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { StatCard } from "@/components/ui/StatCard";
 import { Section } from "@/components/ui/Section";
 import { StatusBadge } from "@/components/ui/Badge";
+import { Icon } from "@/components/ui/Icon";
 
 export async function DealerDashboard({
   companyId,
@@ -43,10 +44,10 @@ export async function DealerDashboard({
       <PageHeader eyebrow="Dealer dashboard" title={dealer.name} subtitle={dealer.areaOfOperation ?? undefined} />
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <StatCard label="Inventory" value={dealer.properties.length} sub={`${available} available`} tone="ink" />
-        <StatCard label="Deals closed" value={dealer.deals.length} tone="accent" />
-        <StatCard label="Share earned" value={compactMoney(earned)} />
-        <StatCard label="Share pending" value={compactMoney(pending)} />
+        <StatCard label="Inventory" value={dealer.properties.length} sub={`${available} available`} tone="ink" icon={<Icon name="home" />} />
+        <StatCard label="Deals closed" value={dealer.deals.length} tone="accent" icon={<Icon name="exchange" />} />
+        <StatCard label="Share earned" value={compactMoney(earned)} tone="ok" icon={<Icon name="check" />} />
+        <StatCard label="Share pending" value={compactMoney(pending)} tone="gold" icon={<Icon name="percent" />} />
       </div>
 
       <Section title="Your inventory">

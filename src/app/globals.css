@@ -1,54 +1,66 @@
 @import "tailwindcss";
 
 /*
-  promptzer — enterprise whitish design system.
-  Light, layered whites · soft borders · professional blue accent · gold used
-  sparingly for money/closed states. Token NAMES are kept stable so the whole
-  app re-themes from here.
+  promptzer — modern enterprise design system.
+  Indigo-primary accent · soft layered surfaces · larger radii · gradient hero accents
+  used sparingly. Token NAMES are kept stable so the whole app re-themes from here.
 */
 @theme {
-  /* Accent — professional blue (actions, links, focus) */
-  --color-accent: #2c5f8a;
-  --color-accent-soft: #234c70;
-  --color-accent-wash: #eaf1f7;
-  --color-accent-line: #d6e2ec;
+  /* Accent — modern indigo / sapphire */
+  --color-accent: #4f46e5;          /* indigo-600 */
+  --color-accent-soft: #4338ca;     /* indigo-700 */
+  --color-accent-wash: #eef2ff;     /* indigo-50  */
+  --color-accent-line: #c7d2fe;     /* indigo-200 */
 
   /* Gold — used sparingly (commission, closed/sold) */
-  --color-gold: #c9a03d;
-  --color-gold-wash: #f7f1e2;
+  --color-gold: #b88a2a;
+  --color-gold-wash: #fdf3d9;
 
   /* Text */
-  --color-ink: #1a1f36; /* primary / near-black */
-  --color-ink-soft: #2a2f45;
-  --color-slate: #5a6a7e; /* secondary */
-  --color-muted: #8a99ae; /* tertiary / placeholders */
+  --color-ink: #0f172a;             /* slate-900 */
+  --color-ink-soft: #1e293b;        /* slate-800 */
+  --color-slate: #475569;           /* slate-600 */
+  --color-muted: #94a3b8;           /* slate-400 */
 
   /* Surfaces & borders */
   --color-paper: #ffffff;
-  --color-canvas: #f8f9fc;
-  --color-subtle: #f2f4f8;
-  --color-line: #e2e6ec;
-  --color-line-soft: #eef1f5;
+  --color-canvas: #f6f7fb;
+  --color-subtle: #eff1f6;
+  --color-line: #e6e8ef;
+  --color-line-soft: #eff1f5;
 
   /* Status — soft, professional */
-  --color-ok: #2b7e5c;
-  --color-ok-bg: #e8f3ee;
-  --color-warn: #c0842c;
-  --color-warn-bg: #f7f0e2;
+  --color-ok: #15803d;
+  --color-ok-bg: #ecfdf5;
+  --color-warn: #b45309;
+  --color-warn-bg: #fff7ed;
   --color-danger: #b91c1c;
-  --color-danger-bg: #fbeded;
+  --color-danger-bg: #fef2f2;
 
   --font-sans: var(--font-inter), -apple-system, BlinkMacSystemFont, "Segoe UI",
     Roboto, Helvetica, Arial, sans-serif;
 
   /* Soft, layered shadows — depth without darkness */
-  --shadow-card: 0 1px 2px rgba(16, 24, 40, 0.04), 0 1px 3px rgba(16, 24, 40, 0.04);
-  --shadow-pop: 0 10px 24px -8px rgba(16, 24, 40, 0.12), 0 4px 8px rgba(16, 24, 40, 0.04);
+  --shadow-card: 0 1px 2px rgba(15, 23, 42, 0.04), 0 1px 2px rgba(15, 23, 42, 0.03);
+  --shadow-soft: 0 8px 24px -12px rgba(15, 23, 42, 0.10), 0 2px 6px -2px rgba(15, 23, 42, 0.04);
+  --shadow-pop:  0 14px 32px -12px rgba(15, 23, 42, 0.16), 0 6px 12px -4px rgba(15, 23, 42, 0.06);
+  --shadow-glow: 0 0 0 4px rgba(79, 70, 229, 0.12);
+}
+
+/* Gradients live on :root (Tailwind v4 @theme only reliably exposes its
+   recognized token namespaces — keep arbitrary CSS vars out here so every
+   `var(--gradient-*)` resolves in inline styles as well). */
+:root {
+  --gradient-brand: linear-gradient(135deg, #6366f1 0%, #4f46e5 45%, #0ea5e9 100%);
+  --gradient-brand-solid: linear-gradient(135deg, #4f46e5 0%, #4338ca 100%);
+  --gradient-mesh:
+    radial-gradient(900px 360px at 12% -10%, rgba(99,102,241,0.10), transparent 60%),
+    radial-gradient(700px 280px at 95% 0%, rgba(14,165,233,0.08), transparent 60%);
 }
 
 html {
   scroll-behavior: smooth;
-  --sidebar-w: 16rem;
+  --sidebar-w: 17rem;
 }
 html.sidebar-collapsed {
   --sidebar-w: 4.75rem;
@@ -56,26 +68,63 @@ html.sidebar-collapsed {
 html.sidebar-collapsed .nav-label {
   display: none;
 }
+html.sidebar-collapsed .nav-group-label {
+  display: none;
+}
 
 body {
   background: var(--color-canvas);
+  background-image: var(--gradient-mesh);
+  background-attachment: fixed;
   color: var(--color-ink-soft);
   font-family: var(--font-sans);
-  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11", "ss01";
   -webkit-font-smoothing: antialiased;
   line-height: 1.55;
 }
 
+/* Subtle reusable utilities ------------------------------------------------ */
+.brand-gradient { background-image: var(--gradient-brand); }
+.brand-text {
+  background-image: var(--gradient-brand);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Light keyframes */
+@keyframes pz-fade-up {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.pz-fade-up { animation: pz-fade-up 280ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+
+@keyframes pz-pulse-dot {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(79,70,229,0.45); }
+  50%      { box-shadow: 0 0 0 6px rgba(79,70,229,0);   }
+}
+
+::selection { background: rgba(79,70,229,0.18); color: var(--color-ink); }
+
+/* Tidy scrollbars in scrolling app shells */
+.pz-scroll::-webkit-scrollbar { width: 10px; height: 10px; }
+.pz-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 999px; border: 2px solid transparent; background-clip: content-box; }
+.pz-scroll::-webkit-scrollbar-thumb:hover { background: #94a3b8; background-clip: content-box; border: 2px solid transparent; }
+
 @layer components {
   .surface {
-    @apply rounded-xl border border-line bg-paper;
+    @apply rounded-2xl border border-line bg-paper;
     box-shadow: var(--shadow-card);
+  }
+  .surface-soft {
+    @apply rounded-2xl border border-line bg-paper;
+    box-shadow: var(--shadow-soft);
   }
 
   .field {
-    @apply w-full rounded-lg border border-line bg-white px-3 py-2 text-sm text-ink
+    @apply w-full rounded-xl border border-line bg-white px-3.5 py-2.5 text-sm text-ink
       outline-none transition placeholder:text-muted
-      focus:border-accent focus:ring-4 focus:ring-accent/10;
+      focus:border-accent focus:ring-4 focus:ring-accent/15;
   }
 
   .label {
@@ -86,23 +135,36 @@ body {
   .btn-primary,
   .btn-accent,
   .btn-ghost {
-    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium
-      transition focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent/15
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-medium
+      transition focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent/20
       disabled:cursor-not-allowed disabled:opacity-50;
   }
 
-  /* Primary + accent CTAs → professional blue */
+  /* Primary + accent CTAs → gradient indigo */
   .btn-primary,
   .btn-accent {
-    @apply bg-accent text-white hover:bg-accent-soft;
-    box-shadow: var(--shadow-card);
+    color: white;
+    background-image: var(--gradient-brand);
+    box-shadow: 0 6px 16px -8px rgba(79,70,229,0.55), 0 1px 2px rgba(15,23,42,0.06);
   }
+  .btn-primary:hover,
+  .btn-accent:hover { filter: brightness(1.04) saturate(1.05); }
 
   .btn-ghost {
-    @apply border border-line bg-white text-slate hover:border-accent/40 hover:text-accent;
+    @apply border border-line bg-white text-slate hover:border-accent/40 hover:text-accent hover:bg-accent-wash/40;
   }
 
   .chip {
-    @apply inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs font-medium;
+    @apply inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs font-medium;
+  }
+
+  .kbd {
+    @apply rounded-md border border-line bg-white px-1.5 py-0.5 text-[11px] font-medium text-muted;
+  }
+
+  /* A reusable little dot used in stat cards / status pills */
+  .live-dot {
+    @apply inline-block h-2 w-2 rounded-full;
+    animation: pz-pulse-dot 2.2s ease-in-out infinite;
   }
 }

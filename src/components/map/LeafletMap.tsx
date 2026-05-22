@@ -4,17 +4,7 @@ import "leaflet/dist/leaflet.css";
 import Link from "next/link";
 import { MapContainer, TileLayer, CircleMarker, Popup, Tooltip } from "react-leaflet";
 import type { MapMarker } from "./MapView";
-
-// Status → marker colour (matches the app's status palette).
-const COLOR: Record<string, string> = {
-  AVAILABLE: "#2b7e5c",
-  SOLD: "#c9a03d",
-  RENTED: "#2c5f8a",
-  RESERVED: "#c0842c",
-  UNDER_NEGOTIATION: "#3b82f6",
-  PENDING_VERIFICATION: "#8a99ae",
-  INACTIVE: "#8a99ae",
-};
+import { COLORS, STATUS_COLOR } from "@/lib/theme";
 
 const KARACHI: [number, number] = [24.86, 67.01];
 
@@ -49,7 +39,12 @@ export function LeafletMap({ markers, zoom, single = false }: LeafletMapProps) {
           key={m.id}
           center={[m.lat, m.lng]}
           radius={9}
-          pathOptions={{ color: "#ffffff", weight: 2, fillColor: COLOR[m.status] ?? "#5a6a7e", fillOpacity: 0.95 }}
+          pathOptions={{
+            color: COLORS.paper,
+            weight: 2,
+            fillColor: STATUS_COLOR[m.status] ?? COLORS.slate,
+            fillOpacity: 0.95,
+          }}
         >
           {!single && (
             <Tooltip direction="top" offset={[0, -6]}>
@@ -58,12 +53,12 @@ export function LeafletMap({ markers, zoom, single = false }: LeafletMapProps) {
           )}
           <Popup>
             <div style={{ minWidth: 180 }}>
-              <p style={{ margin: 0, fontWeight: 600, color: "#1a1f36" }}>{m.title}</p>
-              <p style={{ margin: "2px 0", fontSize: 12, color: "#5a6a7e" }}>
+              <p style={{ margin: 0, fontWeight: 600, color: COLORS.ink }}>{m.title}</p>
+              <p style={{ margin: "2px 0", fontSize: 12, color: COLORS.slate }}>
                 {m.reference} · {m.status.replace(/_/g, " ").toLowerCase()}
               </p>
-              {m.price && <p style={{ margin: "2px 0", fontWeight: 600, color: "#2c5f8a" }}>{m.price}</p>}
-              <Link href={m.href} style={{ fontSize: 12, color: "#2c5f8a", fontWeight: 600 }}>
+              {m.price && <p style={{ margin: "2px 0", fontWeight: 600, color: COLORS.accent }}>{m.price}</p>}
+              <Link href={m.href} style={{ fontSize: 12, color: COLORS.accent, fontWeight: 600 }}>
                 View property →
               </Link>
             </div>

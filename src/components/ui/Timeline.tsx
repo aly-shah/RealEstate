@@ -12,12 +12,16 @@ export function Timeline({ entries }: { entries: TimelineEntry[] }) {
     return <p className="text-sm text-muted">No activity recorded yet.</p>;
   }
   return (
-    <ol className="relative ml-1 space-y-4 border-l border-line pl-5">
+    <ol className="relative space-y-4 border-l border-line pl-6">
       {entries.map((e) => (
         <li key={e.id} className="relative">
-          <span className="absolute -left-[23px] top-1.5 h-2 w-2 rounded-full border border-line bg-canvas" />
+          <span
+            className="absolute -left-[27px] top-1 grid h-4 w-4 place-items-center rounded-full border-2 border-paper shadow-[var(--shadow-card)]"
+            style={{ backgroundImage: "var(--gradient-brand)" }}
+            aria-hidden
+          />
           <p className="text-sm text-ink">{e.summary}</p>
-          <p className="text-xs text-muted">
+          <p className="mt-0.5 text-xs text-muted">
             {fmtDateTime(e.createdAt)}
             {e.who ? ` · ${e.who}` : ""}
           </p>

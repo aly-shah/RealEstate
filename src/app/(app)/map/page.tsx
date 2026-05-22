@@ -7,17 +7,10 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { FilterBar } from "@/components/ui/FilterBar";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { MapView, type MapMarker } from "@/components/map/MapView";
+import { MAP_LEGEND } from "@/lib/theme";
 
 const TYPES = ["RESIDENTIAL", "COMMERCIAL", "PLOT", "APARTMENT", "VILLA", "SHOP", "OFFICE"] as const;
 const STATUSES = ["AVAILABLE", "RESERVED", "UNDER_NEGOTIATION", "RENTED", "SOLD", "INACTIVE", "PENDING_VERIFICATION"] as const;
-
-const LEGEND: { label: string; color: string }[] = [
-  { label: "Available", color: "#2b7e5c" },
-  { label: "Under negotiation", color: "#3b82f6" },
-  { label: "Reserved", color: "#c0842c" },
-  { label: "Rented", color: "#2c5f8a" },
-  { label: "Sold", color: "#c9a03d" },
-];
 
 export default async function MapPage({
   searchParams,
@@ -74,7 +67,7 @@ export default async function MapPage({
       ) : (
         <>
           <div className="mb-3 flex flex-wrap items-center gap-x-5 gap-y-2">
-            {LEGEND.map((l) => (
+            {MAP_LEGEND.map((l) => (
               <span key={l.label} className="flex items-center gap-1.5 text-xs text-slate">
                 <span className="h-2.5 w-2.5 rounded-full" style={{ background: l.color }} />
                 {l.label}

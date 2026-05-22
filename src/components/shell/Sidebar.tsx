@@ -2,9 +2,10 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
-import type { NavItem } from "@/lib/nav";
+import { useEffect, useMemo, useState } from "react";
+import { GROUP_LABELS, type NavGroup, type NavItem } from "@/lib/nav";
 import { Brand } from "@/components/ui/Brand";
+import { Icon } from "@/components/ui/Icon";
 
 interface SidebarProps {
   items: NavItem[];
@@ -15,11 +16,9 @@ interface SidebarProps {
 
 export function Sidebar({ items, companyName, roleLabel, unreadCount = 0 }: SidebarProps) {
   const pathname = usePathname();
-  const [open, setOpen] = useState(false); // mobile drawer
-  const [collapsed, setCollapsed] = useState(false); // desktop rail
+  const [open, setOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
 
-  // Restore + persist desktop collapse via a class on <html> (keeps the main
-  // content margin in sync through the --sidebar-w variable).
   useEffect(() => {
     const saved = localStorage.getItem("pz-sidebar-collapsed") === "1";
     setCollapsed(saved);
@@ -38,81 +37,125 @@ export function Sidebar({ items, companyName, roleLabel, unreadCount = 0 }: Side
   const isActive = (href: string) =>
     href === "/dashboard" ? pathname === href : pathname.startsWith(href);
 
+  /** Preserve order while grouping. */
+  const grouped = useMemo(() => {
+    const out: Array<{ group: NavGroup; items: NavItem[] }> = [];
+    for (const item of items) {
+      const group = (item.group ?? "workspace") as NavGroup;
+      const tail = out[out.length - 1];
+      if (tail && tail.group === group) tail.items.push(item);
+      else out.push({ group, items: [item] });
+    }
+    return out;
+  }, [items]);
+
   return (
     <>
       {/* Mobile top bar */}
-      <div className="flex items-center justify-between border-b border-line bg-paper px-4 py-3 lg:hidden">
+      <div className="flex items-center justify-between border-b border-line bg-paper/90 px-4 py-3 backdrop-blur lg:hidden">
         <Brand />
         <button
           onClick={() => setOpen((v) => !v)}
           aria-label="Toggle navigation"
-          className="rounded-lg border border-line px-3 py-1.5 text-lg text-slate"
+          className="grid h-10 w-10 place-items-center rounded-xl border border-line bg-white text-slate transition hover:border-accent/40 hover:text-accent"
         >
-          ☰
+          <Icon name="menu" className="h-5 w-5" />
         </button>
       </div>
 
       <aside
-        className={`${open ? "block" : "hidden"} border-b border-line bg-canvas transition-[width] lg:fixed lg:inset-y-0 lg:left-0 lg:block lg:w-[var(--sidebar-w)] lg:border-b-0 lg:border-r`}
+        className={`${open ? "block" : "hidden"} border-b border-line bg-paper transition-[width] lg:fixed lg:inset-y-0 lg:left-0 lg:z-40 lg:block lg:w-[var(--sidebar-w)] lg:border-b-0 lg:border-r`}
       >
         <div className="flex h-full flex-col">
+          {/* Brand row */}
           <div className="hidden h-16 items-center px-4 lg:flex">
             <span className="nav-label"><Brand /></span>
-            <span className={`${collapsed ? "block" : "hidden"} grid h-8 w-8 place-items-center rounded-lg bg-accent text-base font-bold text-white`}>
-              p
+            <span
+              className={`${collapsed ? "grid" : "hidden"} h-9 w-9 place-items-center overflow-hidden rounded-xl bg-accent text-white shadow-[var(--shadow-soft)]`}
+              style={{ backgroundImage: "var(--gradient-brand)" }}
+              aria-hidden
+            >
+              <svg viewBox="0 0 24 24" className="h-[58%] w-[58%]" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 11.2 12 4l9 7.2" />
+                <path d="M5.5 10v9.5h13V10" />
+                <path d="M10 19.5V14h4v5.5" />
+              </svg>
             </span>
           </div>
 
+          {/* Company / role card */}
           <div className="nav-label px-4 pb-3 pt-1 lg:pt-0">
-            <p className="truncate text-sm font-semibold text-ink">{companyName}</p>
-            <p className="truncate text-xs text-muted">{roleLabel}</p>
+            <div className="rounded-xl border border-line bg-canvas/60 px-3 py-2.5">
+              <p className="truncate text-sm font-semibold text-ink">{companyName}</p>
+              <p className="truncate text-xs text-muted">{roleLabel}</p>
+            </div>
           </div>
 
-          <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-2">
-            {items.map((item) => {
-              const active = isActive(item.href);
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  onClick={() => setOpen(false)}
-                  title={item.label}
-                  className={`group relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition ${
-                    active
-                      ? "bg-paper font-medium text-accent shadow-[var(--shadow-card)]"
-                      : "text-slate hover:bg-subtle hover:text-ink"
-                  }`}
-                >
-                  {active && <span className="absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-full bg-accent" />}
-                  <span className={`w-5 text-center text-base ${active ? "text-accent" : "text-muted group-hover:text-slate"}`}>
-                    {item.icon}
-                  </span>
-                  <span className="nav-label">{item.label}</span>
-                  {item.href === "/notifications" && unreadCount > 0 && (
-                    <span className="nav-label ml-auto rounded-full bg-accent px-1.5 py-0.5 text-[11px] font-semibold text-white">
-                      {unreadCount}
-                    </span>
-                  )}
-                </Link>
-              );
-            })}
+          {/* Nav */}
+          <nav className="pz-scroll flex-1 space-y-4 overflow-y-auto px-3 pb-4">
+            {grouped.map((section, gi) => (
+              <div key={`${section.group}-${gi}`}>
+                <p className="nav-group-label px-3 pb-1.5 pt-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted">
+                  {GROUP_LABELS[section.group]}
+                </p>
+                <div className="space-y-0.5">
+                  {section.items.map((item) => {
+                    const active = isActive(item.href);
+                    return (
+                      <Link
+                        key={item.href}
+                        href={item.href}
+                        onClick={() => setOpen(false)}
+                        title={item.label}
+                        className={`group relative flex items-center gap-3 rounded-xl px-3 py-2 text-sm transition ${
+                          active
+                            ? "bg-accent-wash font-semibold text-accent"
+                            : "text-slate hover:bg-subtle hover:text-ink"
+                        }`}
+                      >
+                        {active && (
+                          <span className="absolute left-0 top-2 bottom-2 w-1 rounded-r-full brand-gradient" />
+                        )}
+                        <span className={`grid h-8 w-8 place-items-center rounded-lg transition ${
+                          active
+                            ? "bg-white text-accent shadow-[var(--shadow-card)]"
+                            : "text-muted group-hover:text-slate"
+                        }`}>
+                          <Icon name={item.icon} className="h-[18px] w-[18px]" />
+                        </span>
+                        <span className="nav-label flex-1 truncate">{item.label}</span>
+                        {item.href === "/notifications" && unreadCount > 0 && (
+                          <span className="nav-label ml-auto inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-danger px-1.5 text-[10px] font-semibold text-white">
+                            {unreadCount > 9 ? "9+" : unreadCount}
+                          </span>
+                        )}
+                      </Link>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
           </nav>
 
           <div className="border-t border-line p-3">
             <button
               onClick={toggleCollapse}
-              className="hidden w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-muted transition hover:bg-subtle hover:text-ink lg:flex"
+              className="hidden w-full items-center gap-3 rounded-xl px-3 py-2 text-sm text-muted transition hover:bg-subtle hover:text-ink lg:flex"
             >
-              <span className="w-5 text-center text-base">{collapsed ? "»" : "«"}</span>
+              <span className="grid h-8 w-8 place-items-center rounded-lg">
+                <Icon name={collapsed ? "chevron-right" : "chevron-left"} className="h-[18px] w-[18px]" />
+              </span>
               <span className="nav-label">Collapse</span>
             </button>
             <form action="/api/signout" method="post">
               <button
                 type="submit"
                 title="Sign out"
-                className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-slate transition hover:bg-subtle hover:text-danger"
+                className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm text-slate transition hover:bg-danger/10 hover:text-danger"
               >
-                <span className="w-5 text-center text-base">⏻</span>
+                <span className="grid h-8 w-8 place-items-center rounded-lg">
+                  <Icon name="power" className="h-[18px] w-[18px]" />
+                </span>
                 <span className="nav-label">Sign out</span>
               </button>
             </form>

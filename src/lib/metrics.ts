@@ -102,6 +102,70 @@ export async function agentLeaderboard(companyId: string): Promise<AgentRanking[
   return ranked.sort((a, b) => b.revenue - a.revenue || b.dealsWon - a.dealsWon);
 }
 
+export interface RevenuePoint {
+  month: string;
+  key: string;
+  revenue: number;
+}
+
+/** Sales revenue bucketed by month for the last `months` months (inclusive of this one). */
+export async function monthlyRevenue(companyId: string, months = 6): Promise<RevenuePoint[]> {
+  const now = new Date();
+  const buckets: RevenuePoint[] = [];
+  for (let i = months - 1; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    buckets.push({
+      month: d.toLocaleString("en-US", { month: "short" }),
+      key,
+      revenue: 0,
+    });
+  }
+  const since = new Date(now.getFullYear(), now.getMonth() - months + 1, 1);
+
+  const sales = await prisma.sale.findMany({
+    where: {
+      deal: {
+        companyId,
+        status: "CLOSED_WON",
+        closeDate: { gte: since },
+      },
+    },
+    select: { salePrice: true, deal: { select: { closeDate: true } } },
+  });
+
+  for (const s of sales) {
+    const d = s.deal.closeDate;
+    if (!d) continue;
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    const bucket = buckets.find((b) => b.key === key);
+    if (bucket) bucket.revenue += toNumber(s.salePrice);
+  }
+  return buckets;
+}
+
+/** Lead pipeline counts grouped by stage, in canonical workflow order. */
+export async function leadsByStage(companyId: string): Promise<{ stage: string; count: number }[]> {
+  const order = [
+    "NEW",
+    "CONTACTED",
+    "INTERESTED",
+    "SITE_VISIT",
+    "PROPERTY_SHOWN",
+    "NEGOTIATION",
+    "TOKEN_BOOKING",
+    "PAYMENT",
+    "CLOSED_WON",
+  ] as const;
+  const grouped = await prisma.lead.groupBy({
+    by: ["stage"],
+    where: { companyId, stage: { not: "CLOSED_LOST" } },
+    _count: { _all: true },
+  });
+  const map = new Map(grouped.map((g) => [g.stage, g._count._all]));
+  return order.map((stage) => ({ stage, count: map.get(stage) ?? 0 }));
+}
+
 /** Inventory counts grouped by property status. */
 export async function inventorySnapshot(companyId: string): Promise<Record<string, number>> {
   const grouped = await prisma.property.groupBy({

@@ -48,22 +48,28 @@ export function FilterBar({
   );
 
   return (
-    <div className="mb-4 flex flex-wrap items-center gap-2">
+    <div className="mb-4 flex flex-wrap items-center gap-2 rounded-2xl border border-line bg-paper/70 p-2 backdrop-blur">
       {showSearch && (
-        <input
-          type="search"
-          defaultValue={params.get(searchKey) ?? ""}
-          placeholder={searchPlaceholder}
-          onChange={(e) => update(searchKey, e.target.value)}
-          className="field max-w-xs"
-        />
+        <div className="relative flex-1 min-w-[14rem] max-w-md">
+          <svg viewBox="0 0 24 24" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <circle cx="11" cy="11" r="7" />
+            <path d="m20 20-3.5-3.5" />
+          </svg>
+          <input
+            type="search"
+            defaultValue={params.get(searchKey) ?? ""}
+            placeholder={searchPlaceholder}
+            onChange={(e) => update(searchKey, e.target.value)}
+            className="field pl-9"
+          />
+        </div>
       )}
       {filters.map((f) => (
         <select
           key={f.key}
           defaultValue={params.get(f.key) ?? ""}
           onChange={(e) => update(f.key, e.target.value)}
-          className="field max-w-[180px]"
+          className="field max-w-[200px]"
           aria-label={f.label}
         >
           <option value="">{f.label}: All</option>

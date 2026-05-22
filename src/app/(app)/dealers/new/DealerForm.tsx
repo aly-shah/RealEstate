@@ -30,7 +30,7 @@ export function DealerForm() {
         <textarea id="notes" name="notes" rows={3} className="field" />
       </div>
 
-      {state.error && <p className="rounded-lg border border-red-200 bg-danger-bg px-3 py-2 text-sm text-danger">{state.error}</p>}
+      {state.error && <p className="rounded-xl border border-danger/30 bg-danger-bg px-3 py-2 text-sm text-danger">{state.error}</p>}
 
       <div className="flex gap-2">
         <button type="submit" disabled={pending} className="btn-accent">{pending ? "Saving…" : "Save dealer"}</button>

@@ -12,13 +12,18 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { COLORS } from "@/lib/theme";
 
-const INK = "#161513";
-const ACCENT = "#b4892b";
-const LINE = "#e6e3dd";
-const MUTED = "#8a8780";
+const { ink: INK, accent: ACCENT, line: LINE, muted: MUTED, paper: PAPER } = COLORS;
 
 const axis = { stroke: MUTED, fontSize: 11, tickLine: false, axisLine: { stroke: LINE } };
+const tooltipStyle = {
+  border: `1px solid ${LINE}`,
+  borderRadius: 12,
+  fontSize: 12,
+  background: PAPER,
+  boxShadow: "0 8px 24px -12px rgba(15, 23, 42, 0.16)",
+};
 
 function compact(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -32,7 +37,7 @@ export function RevenueTrend({ data }: { data: { month: string; revenue: number 
       <AreaChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
         <defs>
           <linearGradient id="rev" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={ACCENT} stopOpacity={0.25} />
+            <stop offset="0%" stopColor={ACCENT} stopOpacity={0.28} />
             <stop offset="100%" stopColor={ACCENT} stopOpacity={0} />
           </linearGradient>
         </defs>
@@ -41,7 +46,7 @@ export function RevenueTrend({ data }: { data: { month: string; revenue: number 
         <YAxis tickFormatter={compact} width={44} {...axis} />
         <Tooltip
           formatter={(v: number) => [`PKR ${compact(v)}`, "Revenue"]}
-          contentStyle={{ border: `1px solid ${LINE}`, borderRadius: 8, fontSize: 12 }}
+          contentStyle={tooltipStyle}
         />
         <Area type="monotone" dataKey="revenue" stroke={ACCENT} strokeWidth={2} fill="url(#rev)" />
       </AreaChart>
@@ -59,10 +64,10 @@ export function LeadFunnel({ data }: { data: { stage: string; count: number }[] 
         <YAxis type="category" dataKey="stage" width={120} {...axis} />
         <Tooltip
           formatter={(v: number) => [v, "Leads"]}
-          contentStyle={{ border: `1px solid ${LINE}`, borderRadius: 8, fontSize: 12 }}
-          cursor={{ fill: "rgba(0,0,0,0.03)" }}
+          contentStyle={tooltipStyle}
+          cursor={{ fill: "rgba(79, 70, 229, 0.06)" }}
         />
-        <Bar dataKey="count" radius={[0, 4, 4, 0]}>
+        <Bar dataKey="count" radius={[0, 6, 6, 0]}>
           {data.map((_, i) => (
             <Cell key={i} fill={i === max ? INK : ACCENT} fillOpacity={0.35 + (i / Math.max(max, 1)) * 0.5} />
           ))}

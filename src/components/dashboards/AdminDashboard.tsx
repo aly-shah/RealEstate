@@ -6,6 +6,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { StatCard } from "@/components/ui/StatCard";
 import { Section } from "@/components/ui/Section";
 import { StatusBadge } from "@/components/ui/Badge";
+import { Icon } from "@/components/ui/Icon";
 
 export async function AdminDashboard({ companyId }: { companyId: string }) {
   const startOfDay = new Date();
@@ -41,10 +42,10 @@ export async function AdminDashboard({ companyId }: { companyId: string }) {
       />
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <StatCard label="Leads to assign" value={unassignedLeads} tone="accent" />
-        <StatCard label="Visits to verify" value={visitsToVerify} />
-        <StatCard label="Docs to check" value={docsToCheck} />
-        <StatCard label="Payments due" value={pay.count} sub="pending + overdue" />
+        <StatCard label="Leads to assign" value={unassignedLeads} tone="accent" icon={<Icon name="target" />} />
+        <StatCard label="Visits to verify" value={visitsToVerify} tone="ink" icon={<Icon name="flag" />} />
+        <StatCard label="Docs to check" value={docsToCheck} icon={<Icon name="document" />} />
+        <StatCard label="Payments due" value={pay.count} sub="pending + overdue" tone="danger" icon={<Icon name="banknote" />} />
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">

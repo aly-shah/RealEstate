@@ -9,15 +9,15 @@ export function Table({ head, children }: TableProps) {
     <div className="surface overflow-x-auto">
       <table className="w-full border-collapse text-sm">
         <thead>
-          <tr className="border-b border-line bg-subtle text-left text-xs uppercase tracking-wide text-muted">
+          <tr className="border-b border-line bg-canvas/60 text-left text-[10px] uppercase tracking-[0.14em] text-muted">
             {head.map((h, i) => (
-              <th key={i} className="whitespace-nowrap px-4 py-3 font-medium">
+              <th key={i} className="whitespace-nowrap px-4 py-3 font-semibold">
                 {h}
               </th>
             ))}
           </tr>
         </thead>
-        <tbody className="divide-y divide-line-soft">{children}</tbody>
+        <tbody className="divide-y divide-line-soft [&>tr]:transition [&>tr:hover]:bg-accent-wash/30">{children}</tbody>
       </table>
     </div>
   );

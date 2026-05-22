@@ -7,15 +7,18 @@ interface PageHeaderProps {
 
 export function PageHeader({ eyebrow, title, subtitle, action }: PageHeaderProps) {
   return (
-    <div className="mb-6 flex flex-wrap items-end justify-between gap-4 border-b border-line pb-5">
+    <div className="pz-fade-up mb-6 flex flex-wrap items-end justify-between gap-4">
       <div>
         {eyebrow && (
-          <p className="mb-1.5 text-xs font-medium uppercase tracking-[0.14em] text-muted">
+          <p className="mb-2 inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-accent">
+            <span className="inline-block h-1.5 w-1.5 rounded-full brand-gradient" />
             {eyebrow}
           </p>
         )}
-        <h1 className="text-2xl font-semibold tracking-tight text-ink">{title}</h1>
-        {subtitle && <p className="mt-1.5 max-w-2xl text-sm text-muted">{subtitle}</p>}
+        <h1 className="text-[1.85rem] font-semibold leading-tight tracking-tight text-ink sm:text-3xl">
+          {title}
+        </h1>
+        {subtitle && <p className="mt-2 max-w-2xl text-sm text-slate">{subtitle}</p>}
       </div>
       {action && <div className="flex items-center gap-2">{action}</div>}
     </div>
