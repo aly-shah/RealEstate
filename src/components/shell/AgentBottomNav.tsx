@@ -3,23 +3,24 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Icon, type IconName } from "@/components/ui/Icon";
+import type { Dict } from "@/lib/i18n/dictionary";
 
 interface Tab {
   href: string;
-  label: string;
   icon: IconName;
+  labelKey: keyof Dict["nav"];
 }
 
 const TABS: Tab[] = [
-  { href: "/dashboard",     label: "Today",    icon: "dashboard" },
-  { href: "/leads",         label: "Leads",    icon: "target"    },
-  { href: "/visits",        label: "Visits",   icon: "flag"      },
-  { href: "/calendar",      label: "Calendar", icon: "calendar"  },
-  { href: "/notifications", label: "Alerts",   icon: "bell"      },
+  { href: "/dashboard",     icon: "dashboard", labelKey: "dashboard"     },
+  { href: "/leads",         icon: "target",    labelKey: "leads"         },
+  { href: "/visits",        icon: "flag",      labelKey: "visits"        },
+  { href: "/calendar",      icon: "calendar",  labelKey: "calendar"      },
+  { href: "/notifications", icon: "bell",      labelKey: "notifications" },
 ];
 
 /** Fixed bottom tab bar for the agent panel — phone only (hidden on lg). */
-export function AgentBottomNav({ unreadCount = 0 }: { unreadCount?: number }) {
+export function AgentBottomNav({ unreadCount = 0, dict }: { unreadCount?: number; dict: Dict }) {
   const pathname = usePathname();
   const isActive = (href: string) =>
     href === "/dashboard" ? pathname === href : pathname.startsWith(href);
@@ -42,12 +43,12 @@ export function AgentBottomNav({ unreadCount = 0 }: { unreadCount?: number }) {
               }`}>
                 <Icon name={t.icon} className="h-5 w-5" />
                 {t.href === "/notifications" && unreadCount > 0 && (
-                  <span className="absolute -right-0.5 -top-0.5 grid h-3.5 min-w-3.5 place-items-center rounded-full bg-danger px-0.5 text-[9px] font-semibold text-white">
+                  <span className="absolute -end-0.5 -top-0.5 grid h-3.5 min-w-3.5 place-items-center rounded-full bg-danger px-0.5 text-[9px] font-semibold text-white">
                     {unreadCount > 9 ? "9+" : unreadCount}
                   </span>
                 )}
               </span>
-              {t.label}
+              {dict.nav[t.labelKey]}
               {active && <span className="absolute inset-x-7 top-0 h-0.5 rounded-full bg-accent" />}
             </Link>
           );

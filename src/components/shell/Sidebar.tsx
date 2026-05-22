@@ -3,18 +3,46 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { GROUP_LABELS, type NavGroup, type NavItem } from "@/lib/nav";
+import { type NavGroup, type NavItem } from "@/lib/nav";
 import { Brand } from "@/components/ui/Brand";
 import { Icon } from "@/components/ui/Icon";
+import type { Dict } from "@/lib/i18n/dictionary";
 
 interface SidebarProps {
   items: NavItem[];
   companyName: string;
   roleLabel: string;
   unreadCount?: number;
+  dict: Dict;
 }
 
-export function Sidebar({ items, companyName, roleLabel, unreadCount = 0 }: SidebarProps) {
+/** Map an `/href` to a nav-label translation key. */
+const NAV_KEY: Record<string, keyof Dict["nav"]> = {
+  "/dashboard": "dashboard",
+  "/properties": "properties",
+  "/map": "map",
+  "/leads": "leads",
+  "/deals": "deals",
+  "/calendar": "calendar",
+  "/visits": "visits",
+  "/commissions": "commissions",
+  "/payments": "payments",
+  "/agents": "agents",
+  "/dealers": "dealers",
+  "/documents": "documents",
+  "/reports": "reports",
+  "/activity": "activityLog",
+  "/notifications": "notifications",
+  "/settings": "settings",
+  "/admin/companies": "companies",
+};
+
+function navLabel(item: NavItem, dict: Dict): string {
+  const key = NAV_KEY[item.href];
+  return key ? dict.nav[key] : item.label;
+}
+
+export function Sidebar({ items, companyName, roleLabel, unreadCount = 0, dict }: SidebarProps) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
@@ -64,7 +92,7 @@ export function Sidebar({ items, companyName, roleLabel, unreadCount = 0 }: Side
       </div>
 
       <aside
-        className={`${open ? "block" : "hidden"} border-b border-line bg-paper transition-[width] lg:fixed lg:inset-y-0 lg:left-0 lg:z-40 lg:block lg:w-[var(--sidebar-w)] lg:border-b-0 lg:border-r`}
+        className={`${open ? "block" : "hidden"} border-b border-line bg-paper transition-[width] lg:fixed lg:inset-y-0 lg:start-0 lg:z-40 lg:block lg:w-[var(--sidebar-w)] lg:border-b-0 lg:border-e`}
       >
         <div className="flex h-full flex-col">
           {/* Brand row */}
@@ -96,7 +124,7 @@ export function Sidebar({ items, companyName, roleLabel, unreadCount = 0 }: Side
             {grouped.map((section, gi) => (
               <div key={`${section.group}-${gi}`}>
                 <p className="nav-group-label px-3 pb-1.5 pt-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted">
-                  {GROUP_LABELS[section.group]}
+                  {dict.groups[section.group as keyof Dict["groups"]] ?? section.group}
                 </p>
                 <div className="space-y-0.5">
                   {section.items.map((item) => {
@@ -106,7 +134,7 @@ export function Sidebar({ items, companyName, roleLabel, unreadCount = 0 }: Side
                         key={item.href}
                         href={item.href}
                         onClick={() => setOpen(false)}
-                        title={item.label}
+                        title={navLabel(item, dict)}
                         className={`group relative flex items-center gap-3 rounded-xl px-3 py-2 text-sm transition ${
                           active
                             ? "bg-accent-wash font-semibold text-accent"
@@ -114,7 +142,7 @@ export function Sidebar({ items, companyName, roleLabel, unreadCount = 0 }: Side
                         }`}
                       >
                         {active && (
-                          <span className="absolute left-0 top-2 bottom-2 w-1 rounded-r-full brand-gradient" />
+                          <span className="absolute start-0 top-2 bottom-2 w-1 rounded-e-full brand-gradient" />
                         )}
                         <span className={`grid h-8 w-8 place-items-center rounded-lg transition ${
                           active
@@ -123,9 +151,9 @@ export function Sidebar({ items, companyName, roleLabel, unreadCount = 0 }: Side
                         }`}>
                           <Icon name={item.icon} className="h-[18px] w-[18px]" />
                         </span>
-                        <span className="nav-label flex-1 truncate">{item.label}</span>
+                        <span className="nav-label flex-1 truncate">{navLabel(item, dict)}</span>
                         {item.href === "/notifications" && unreadCount > 0 && (
-                          <span className="nav-label ml-auto inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-danger px-1.5 text-[10px] font-semibold text-white">
+                          <span className="nav-label ms-auto inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-danger px-1.5 text-[10px] font-semibold text-white">
                             {unreadCount > 9 ? "9+" : unreadCount}
                           </span>
                         )}
@@ -143,20 +171,20 @@ export function Sidebar({ items, companyName, roleLabel, unreadCount = 0 }: Side
               className="hidden w-full items-center gap-3 rounded-xl px-3 py-2 text-sm text-muted transition hover:bg-subtle hover:text-ink lg:flex"
             >
               <span className="grid h-8 w-8 place-items-center rounded-lg">
-                <Icon name={collapsed ? "chevron-right" : "chevron-left"} className="h-[18px] w-[18px]" />
+                <Icon name={collapsed ? "chevron-right" : "chevron-left"} className="h-[18px] w-[18px] rtl:rotate-180" />
               </span>
-              <span className="nav-label">Collapse</span>
+              <span className="nav-label">{dict.shell.collapse}</span>
             </button>
             <form action="/api/signout" method="post">
               <button
                 type="submit"
-                title="Sign out"
+                title={dict.shell.signOut}
                 className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm text-slate transition hover:bg-danger/10 hover:text-danger"
               >
                 <span className="grid h-8 w-8 place-items-center rounded-lg">
                   <Icon name="power" className="h-[18px] w-[18px]" />
                 </span>
-                <span className="nav-label">Sign out</span>
+                <span className="nav-label">{dict.shell.signOut}</span>
               </button>
             </form>
           </div>

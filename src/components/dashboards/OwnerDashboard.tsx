@@ -10,11 +10,12 @@ import {
   outstandingPayments,
   salesRevenue,
 } from "@/lib/metrics";
-import { compactMoney, money, initials } from "@/lib/format";
+import { compactMoney, money, initials, localizeDigits } from "@/lib/format";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { StatCard } from "@/components/ui/StatCard";
 import { Section } from "@/components/ui/Section";
 import { Icon } from "@/components/ui/Icon";
+import { getDict } from "@/lib/i18n/server";
 import {
   InventoryDonut,
   LeadsFunnelChart,
@@ -22,8 +23,9 @@ import {
 } from "./DashboardCharts";
 
 export async function OwnerDashboard({ companyId }: { companyId: string }) {
-  const [revMonth, revAll, comm, pay, board, inv, pipeline, revTrend, leadStages] =
+  const [{ locale, dict }, revMonth, revAll, comm, pay, board, inv, pipeline, revTrend, leadStages] =
     await Promise.all([
+      getDict(),
       salesRevenue(companyId, monthStart()),
       salesRevenue(companyId),
       commissionTotals(companyId),
@@ -37,7 +39,6 @@ export async function OwnerDashboard({ companyId }: { companyId: string }) {
       leadsByStage(companyId),
     ]);
 
-  // Month-over-month delta for the headline stat.
   const lastMonthRev = revTrend.length >= 2 ? revTrend[revTrend.length - 2].revenue : 0;
   const delta =
     lastMonthRev > 0
@@ -47,43 +48,43 @@ export async function OwnerDashboard({ companyId }: { companyId: string }) {
         : 0;
   const deltaLabel =
     delta === 0
-      ? "Flat vs last month"
-      : `${delta > 0 ? "▲" : "▼"} ${Math.abs(delta)}% vs last month`;
+      ? dict.dashboard.deltaFlat
+      : `${delta > 0 ? "▲" : "▼"} ${localizeDigits(Math.abs(delta), locale)}% ${dict.dashboard.deltaUp}`;
 
   return (
     <div className="space-y-6">
       <PageHeader
-        eyebrow="Owner dashboard"
-        title="How the business is doing"
-        subtitle="Revenue, commissions, pipeline and the people driving it — in one view."
+        eyebrow={dict.dashboard.owner.eyebrow}
+        title={dict.dashboard.owner.title}
+        subtitle={dict.dashboard.owner.subtitle}
       />
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatCard
-          label="Revenue this month"
-          value={compactMoney(revMonth)}
+          label={dict.stats.revenueThisMonth}
+          value={compactMoney(revMonth, locale)}
           sub={deltaLabel}
           tone="accent"
           icon={<Icon name="banknote" />}
         />
         <StatCard
-          label="Commission pending"
-          value={compactMoney(comm.pending)}
-          sub={`${compactMoney(comm.paid)} paid`}
+          label={dict.stats.commissionPending}
+          value={compactMoney(comm.pending, locale)}
+          sub={`${compactMoney(comm.paid, locale)} ${dict.stats.paid}`}
           tone="gold"
           icon={<Icon name="percent" />}
         />
         <StatCard
-          label="Open deals"
-          value={pipeline}
-          sub="In the pipeline"
+          label={dict.stats.openDeals}
+          value={localizeDigits(pipeline, locale)}
+          sub={dict.stats.inPipeline}
           tone="ink"
           icon={<Icon name="exchange" />}
         />
         <StatCard
-          label="Overdue payments"
-          value={compactMoney(pay.overdue)}
-          sub={`${pay.count} outstanding`}
+          label={dict.stats.overduePayments}
+          value={compactMoney(pay.overdue, locale)}
+          sub={`${localizeDigits(pay.count, locale)} ${dict.stats.outstanding}`}
           tone="danger"
           icon={<Icon name="alert" />}
         />
@@ -92,59 +93,56 @@ export async function OwnerDashboard({ companyId }: { companyId: string }) {
       {/* Revenue trend + inventory donut */}
       <div className="grid gap-6 lg:grid-cols-3">
         <Section
-          title="Revenue trend · last 6 months"
+          title={dict.sections.revenueTrend}
           className="lg:col-span-2"
           action={
-            <Link
-              href="/reports"
-              className="text-xs font-semibold text-accent hover:text-accent-soft"
-            >
-              Reports →
+            <Link href="/reports" className="text-xs font-semibold text-accent hover:text-accent-soft">
+              {dict.common.reports} →
             </Link>
           }
         >
-          <RevenueTrendChart data={revTrend} />
+          <RevenueTrendChart data={revTrend} locale={locale} labels={{ peak: dict.common.peak }} />
           <p className="mt-3 text-xs text-muted">
-            All-time revenue: <span className="font-semibold text-ink">{money(revAll)}</span>
+            {dict.dashboard.allTimeRevenue}{" "}
+            <span className="font-semibold text-ink">{money(revAll, locale)}</span>
           </p>
         </Section>
 
-        <Section title="Inventory mix">
-          <InventoryDonut data={inv} />
+        <Section title={dict.sections.inventoryMix}>
+          <InventoryDonut
+            data={inv}
+            locale={locale}
+            statusLabels={dict.status}
+            totalLabel={dict.common.total}
+          />
         </Section>
       </div>
 
       {/* Funnel + leaderboard */}
       <div className="grid gap-6 lg:grid-cols-5">
         <Section
-          title="Lead pipeline"
+          title={dict.sections.leadPipeline}
           className="lg:col-span-3"
           action={
-            <Link
-              href="/leads"
-              className="text-xs font-semibold text-accent hover:text-accent-soft"
-            >
-              All leads →
+            <Link href="/leads" className="text-xs font-semibold text-accent hover:text-accent-soft">
+              {dict.common.allLeads} →
             </Link>
           }
         >
-          <LeadsFunnelChart data={leadStages} />
+          <LeadsFunnelChart data={leadStages} locale={locale} stageLabels={dict.status} />
         </Section>
 
         <Section
-          title="Agent leaderboard"
+          title={dict.sections.agentLeaderboard}
           className="lg:col-span-2"
           action={
-            <Link
-              href="/agents"
-              className="text-xs font-semibold text-accent hover:text-accent-soft"
-            >
-              View all →
+            <Link href="/agents" className="text-xs font-semibold text-accent hover:text-accent-soft">
+              {dict.common.viewAll} →
             </Link>
           }
         >
           {board.length === 0 ? (
-            <p className="text-sm text-muted">No agents yet.</p>
+            <p className="text-sm text-muted">{dict.empty.noAgents}</p>
           ) : (
             <ol className="space-y-2">
               {board.slice(0, 5).map((a, i) => (
@@ -162,19 +160,19 @@ export async function OwnerDashboard({ companyId }: { companyId: string }) {
                     }`}
                     style={i === 0 ? { backgroundImage: "var(--gradient-brand)" } : undefined}
                   >
-                    {i + 1}
+                    {localizeDigits(i + 1, locale)}
                   </span>
-                  <span className="grid h-9 w-9 place-items-center rounded-full bg-ink/5 text-[11px] font-semibold text-ink">
+                  <span className="grid h-9 w-9 place-items-center rounded-full bg-ink/5 text-[11px] font-semibold text-ink" data-keep-latin>
                     {initials(a.name)}
                   </span>
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-semibold text-ink">{a.name}</p>
                     <p className="text-xs text-muted">
-                      {a.dealsWon} won · {a.conversion}% conversion · {a.leads} leads
+                      {localizeDigits(a.dealsWon, locale)} {dict.units.won} · {localizeDigits(a.conversion, locale)}% {dict.units.conversion} · {localizeDigits(a.leads, locale)} {dict.units.leads}
                     </p>
                   </div>
                   <span className="text-sm font-semibold text-ink">
-                    {compactMoney(a.revenue)}
+                    {compactMoney(a.revenue, locale)}
                   </span>
                 </li>
               ))}

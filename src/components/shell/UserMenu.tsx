@@ -4,14 +4,16 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { initials } from "@/lib/format";
 import { Icon } from "@/components/ui/Icon";
+import type { Dict } from "@/lib/i18n/dictionary";
 
 interface UserMenuProps {
   name: string;
   roleLabel: string;
   canManage: boolean;
+  dict: Dict;
 }
 
-export function UserMenu({ name, roleLabel, canManage }: UserMenuProps) {
+export function UserMenu({ name, roleLabel, canManage, dict }: UserMenuProps) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -35,7 +37,7 @@ export function UserMenu({ name, roleLabel, canManage }: UserMenuProps) {
         >
           {initials(name)}
         </span>
-        <span className="hidden text-left sm:block">
+        <span className="hidden text-start sm:block">
           <span className="block text-sm font-medium leading-tight text-ink">{name}</span>
           <span className="block text-xs leading-tight text-muted">{roleLabel}</span>
         </span>
@@ -43,22 +45,22 @@ export function UserMenu({ name, roleLabel, canManage }: UserMenuProps) {
       </button>
 
       {open && (
-        <div className="pz-fade-up absolute right-0 z-50 mt-2 w-56 overflow-hidden rounded-2xl border border-line bg-paper p-1 shadow-[var(--shadow-pop)]">
+        <div className="pz-fade-up absolute end-0 z-50 mt-2 w-56 overflow-hidden rounded-2xl border border-line bg-paper p-1 shadow-[var(--shadow-pop)]">
           <div className="border-b border-line px-3 py-2.5">
             <p className="text-sm font-semibold text-ink">{name}</p>
             <p className="text-xs text-muted">{roleLabel}</p>
           </div>
           <Link href="/notifications" onClick={() => setOpen(false)} className="block rounded-lg px-3 py-2 text-sm text-slate hover:bg-subtle hover:text-ink">
-            Notifications
+            {dict.nav.notifications}
           </Link>
           {canManage && (
             <Link href="/settings" onClick={() => setOpen(false)} className="block rounded-lg px-3 py-2 text-sm text-slate hover:bg-subtle hover:text-ink">
-              Settings
+              {dict.nav.settings}
             </Link>
           )}
           <form action="/api/signout" method="post" className="border-t border-line pt-1 mt-1">
-            <button type="submit" className="block w-full rounded-lg px-3 py-2 text-left text-sm text-danger hover:bg-danger/10">
-              Sign out
+            <button type="submit" className="block w-full rounded-lg px-3 py-2 text-start text-sm text-danger hover:bg-danger/10">
+              {dict.shell.signOut}
             </button>
           </form>
         </div>

@@ -15,7 +15,8 @@ import {
   YAxis,
 } from "recharts";
 import { COLORS, STATUS_COLOR } from "@/lib/theme";
-import { compactMoney, humanize } from "@/lib/format";
+import { compactMoney, humanize, localizeDigits } from "@/lib/format";
+import type { Locale } from "@/lib/i18n/dictionary";
 
 const axis = {
   stroke: COLORS.muted,
@@ -42,7 +43,13 @@ interface RevenuePoint {
   revenue: number;
 }
 
-export function RevenueTrendChart({ data }: { data: RevenuePoint[] }) {
+interface RevenueTrendChartProps {
+  data: RevenuePoint[];
+  locale?: Locale;
+  labels?: { peak?: string };
+}
+
+export function RevenueTrendChart({ data, locale = "en", labels }: RevenueTrendChartProps) {
   const total = data.reduce((s, p) => s + p.revenue, 0);
   const peak = Math.max(...data.map((p) => p.revenue));
   const peakMonth = data.find((p) => p.revenue === peak)?.month ?? "—";
@@ -52,15 +59,19 @@ export function RevenueTrendChart({ data }: { data: RevenuePoint[] }) {
       <div className="mb-3 flex flex-wrap items-baseline justify-between gap-3 px-1">
         <div>
           <p className="text-2xl font-semibold tracking-tight text-ink">
-            {compactMoney(total)}
+            {compactMoney(total, locale)}
           </p>
-          <p className="text-xs text-muted">{data.length}-month sales total</p>
+          <p className="text-xs text-muted">
+            {localizeDigits(data.length, locale)}-month sales total
+          </p>
         </div>
         {peak > 0 && (
-          <div className="text-right">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted">Peak</p>
+          <div className="text-end">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted">
+              {labels?.peak ?? "Peak"}
+            </p>
             <p className="text-sm font-semibold text-accent">
-              {peakMonth} · {compactMoney(peak)}
+              {peakMonth} · {compactMoney(peak, locale)}
             </p>
           </div>
         )}
@@ -76,16 +87,21 @@ export function RevenueTrendChart({ data }: { data: RevenuePoint[] }) {
           <CartesianGrid strokeDasharray="3 3" stroke={COLORS.line} vertical={false} />
           <XAxis dataKey="month" {...axis} />
           <YAxis
-            tickFormatter={(v: number) =>
-              v >= 1_000_000 ? `${(v / 1_000_000).toFixed(1)}M` : v >= 1_000 ? `${Math.round(v / 1_000)}K` : String(v)
-            }
+            tickFormatter={(v: number) => {
+              const s = v >= 1_000_000
+                ? `${(v / 1_000_000).toFixed(1)}M`
+                : v >= 1_000
+                  ? `${Math.round(v / 1_000)}K`
+                  : String(v);
+              return localizeDigits(s, locale);
+            }}
             width={44}
             {...axis}
           />
           <Tooltip
             contentStyle={tooltipStyle}
             labelStyle={labelStyle}
-            formatter={(v: number) => [compactMoney(v), "Revenue"]}
+            formatter={(v: number) => [compactMoney(v, locale), "Revenue"]}
           />
           <Area
             type="monotone"
@@ -114,17 +130,29 @@ const INVENTORY_FALLBACK = [
   COLORS.danger,
 ];
 
-export function InventoryDonut({ data }: { data: Record<string, number> }) {
+interface InventoryDonutProps {
+  data: Record<string, number>;
+  locale?: Locale;
+  statusLabels?: Partial<Record<string, string>>;
+  totalLabel?: string;
+}
+
+export function InventoryDonut({
+  data,
+  locale = "en",
+  statusLabels,
+  totalLabel = "Total",
+}: InventoryDonutProps) {
   const entries = Object.entries(data);
   const total = entries.reduce((s, [, n]) => s + n, 0);
 
   if (total === 0) {
-    return <p className="py-8 text-center text-sm text-muted">No properties yet.</p>;
+    return <p className="py-8 text-center text-sm text-muted">—</p>;
   }
 
   const slices = entries
     .map(([status, count], i) => ({
-      name: humanize(status),
+      name: statusLabels?.[status] ?? humanize(status),
       status,
       value: count,
       color: STATUS_COLOR[status] ?? INVENTORY_FALLBACK[i % INVENTORY_FALLBACK.length],
@@ -157,15 +185,22 @@ export function InventoryDonut({ data }: { data: Record<string, number> }) {
               formatter={(v: number, _name, item) => {
                 const pct = total ? Math.round((v / total) * 100) : 0;
                 const label = (item && (item as { name?: string }).name) || "";
-                return [`${v} · ${pct}%`, label];
+                return [
+                  `${localizeDigits(v, locale)} · ${localizeDigits(pct, locale)}%`,
+                  label,
+                ];
               }}
             />
           </PieChart>
         </ResponsiveContainer>
         <div className="pointer-events-none absolute inset-0 grid place-items-center text-center">
           <div>
-            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted">Total</p>
-            <p className="text-2xl font-semibold tracking-tight text-ink">{total}</p>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted">
+              {totalLabel}
+            </p>
+            <p className="text-2xl font-semibold tracking-tight text-ink">
+              {localizeDigits(total, locale)}
+            </p>
           </div>
         </div>
       </div>
@@ -177,8 +212,12 @@ export function InventoryDonut({ data }: { data: Record<string, number> }) {
             <li key={s.status} className="flex items-center gap-2">
               <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: s.color }} />
               <span className="min-w-0 flex-1 truncate text-slate">{s.name}</span>
-              <span className="font-semibold text-ink">{s.value}</span>
-              <span className="w-9 text-right text-xs text-muted">{pct}%</span>
+              <span className="font-semibold text-ink">
+                {localizeDigits(s.value, locale)}
+              </span>
+              <span className="w-10 text-end text-xs text-muted">
+                {localizeDigits(pct, locale)}%
+              </span>
             </li>
           );
         })}
@@ -189,20 +228,39 @@ export function InventoryDonut({ data }: { data: Record<string, number> }) {
 
 /* ──────────────────────────────────────────── Leads funnel ──────── */
 
-export function LeadsFunnelChart({ data }: { data: { stage: string; count: number }[] }) {
+interface LeadsFunnelChartProps {
+  data: { stage: string; count: number }[];
+  locale?: Locale;
+  stageLabels?: Partial<Record<string, string>>;
+}
+
+export function LeadsFunnelChart({
+  data,
+  locale = "en",
+  stageLabels,
+}: LeadsFunnelChartProps) {
   const max = Math.max(...data.map((d) => d.count), 1);
-  const rows = data.map((d) => ({ stage: humanize(d.stage), count: d.count, raw: d.stage }));
+  const rows = data.map((d) => ({
+    stage: stageLabels?.[d.stage] ?? humanize(d.stage),
+    count: d.count,
+    raw: d.stage,
+  }));
 
   return (
     <ResponsiveContainer width="100%" height={Math.max(240, rows.length * 28)}>
       <BarChart data={rows} layout="vertical" margin={{ top: 4, right: 24, left: 8, bottom: 0 }}>
         <CartesianGrid strokeDasharray="3 3" stroke={COLORS.line} horizontal={false} />
-        <XAxis type="number" {...axis} allowDecimals={false} />
+        <XAxis
+          type="number"
+          {...axis}
+          allowDecimals={false}
+          tickFormatter={(v: number) => localizeDigits(v, locale)}
+        />
         <YAxis type="category" dataKey="stage" width={120} {...axis} />
         <Tooltip
           contentStyle={tooltipStyle}
           labelStyle={labelStyle}
-          formatter={(v: number) => [v, "Leads"]}
+          formatter={(v: number) => [localizeDigits(v, locale), "Leads"]}
           cursor={{ fill: "rgba(79, 70, 229, 0.06)" }}
         />
         <Bar dataKey="count" radius={[0, 6, 6, 0]} barSize={16}>
