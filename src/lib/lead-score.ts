@@ -82,6 +82,22 @@ export function scoreLead(input: ScoreInput): LeadScoreResult {
   const reasons: string[] = [];
   let score = 0;
 
+  // Terminal lost leads score a hard 0 — the funnel ended with no value, so
+  // no surrounding signal (referral, recency, showing…) should lift them off
+  // the floor. CLOSED_WON is the opposite extreme and flows through the normal
+  // path, landing at the clamped 100 via its stage points. An admin override
+  // can still pin the band; the raw score stays 0.
+  if (input.stage === "CLOSED_LOST") {
+    const band: LeadBand = input.override
+      ? input.override === "HOT"
+        ? "HOT"
+        : input.override === "WARM"
+          ? "WARM"
+          : "COLD"
+      : "COLD";
+    return { score: 0, band, reasons: ["Closed lost — no score"], overridden: !!input.override };
+  }
+
   // Stage signal (the dominant factor).
   const stagePts = STAGE_POINTS[input.stage] ?? 0;
   score += stagePts;

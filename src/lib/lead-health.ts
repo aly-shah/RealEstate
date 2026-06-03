@@ -32,7 +32,7 @@ interface HealthInput {
  */
 const STALE_DAYS: Partial<Record<LeadStage, number>> = {
   NEW: 2,
-  CONTACTED: 5,
+  CONTACTED: 7,
   INTERESTED: 7,
   SITE_VISIT: 7,
   PROPERTY_SHOWN: 7,
