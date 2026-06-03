@@ -6,7 +6,13 @@ import { humanize } from "@/lib/format";
 
 const PAYMENT_TYPES = ["TOKEN", "BOOKING", "DOWN_PAYMENT", "INSTALMENT", "RENT", "DEPOSIT", "COMMISSION"];
 
-export function PaymentForm({ deals }: { deals: { id: string; reference: string }[] }) {
+interface PaymentFormProps {
+  deals: { id: string; reference: string }[];
+  /** Currently-open invoices (status ISSUED) — drives the optional invoice picker. */
+  invoices?: { id: string; number: string; amount: string }[];
+}
+
+export function PaymentForm({ deals, invoices = [] }: PaymentFormProps) {
   const [open, setOpen] = useState(false);
   const [state, action, pending] = useActionState<FormState, FormData>(async (p, fd) => {
     const res = await recordPayment(p, fd);
@@ -21,6 +27,22 @@ export function PaymentForm({ deals }: { deals: { id: string; reference: string 
       ) : (
         <form action={action} className="surface w-full max-w-2xl space-y-3 p-5">
           <div className="grid gap-3 sm:grid-cols-2">
+            {invoices.length > 0 && (
+              <div className="sm:col-span-2">
+                <label className="label" htmlFor="invoiceId">Apply to invoice (optional)</label>
+                <select id="invoiceId" name="invoiceId" className="field" defaultValue="">
+                  <option value="">— None —</option>
+                  {invoices.map((inv) => (
+                    <option key={inv.id} value={inv.id}>
+                      {inv.number} · {inv.amount}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-1 text-xs text-muted">
+                  When set, the invoice auto-marks PAID once linked payments cover its amount.
+                </p>
+              </div>
+            )}
             <div>
               <label className="label" htmlFor="dealId">Deal (optional)</label>
               <select id="dealId" name="dealId" className="field" defaultValue="">
@@ -39,8 +61,8 @@ export function PaymentForm({ deals }: { deals: { id: string; reference: string 
               <label className="label" htmlFor="status">Status</label>
               <select id="status" name="status" className="field" defaultValue="PAID">
                 <option value="PAID">Paid</option>
-                <option value="PENDING">Pending</option>
                 <option value="PARTIAL">Partial</option>
+                <option value="PENDING">Pending</option>
                 <option value="OVERDUE">Overdue</option>
               </select>
             </div>

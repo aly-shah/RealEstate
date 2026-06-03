@@ -47,16 +47,25 @@ export const STATUS_TONE: Record<string, Tone> = {
   PARTIAL: "neutral",
   PAID: "ok",
   OVERDUE: "danger",
+  // invoices
+  ISSUED: "accent",
+  CANCELLED: "neutral",
   // commission / verification
   PENDING_APPROVAL: "warn",
   APPROVED: "neutral",
   VERIFIED: "ok",
   REJECTED: "danger",
   FLAGGED: "warn",
-  // generic
+  // generic + billing
   ACTIVE: "ok",
   SUSPENDED: "danger",
   TRIAL: "neutral",
+  GRACE: "warn",
+  PAST_DUE: "danger",
+  // jobs
+  QUEUED: "accent",
+  RUNNING: "ink",
+  FAILED: "danger",
 };
 
 interface BadgeProps {

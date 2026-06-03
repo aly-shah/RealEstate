@@ -1,9 +1,10 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useId, useMemo, useState } from "react";
 import Link from "next/link";
 import { createLead, type FormState } from "../actions";
 import { humanize } from "@/lib/format";
+import { PK_CITIES, suggestedAreas } from "@/lib/pk-areas";
 
 const SOURCES = ["REFERRAL", "WALK_IN", "SOCIAL_MEDIA", "PORTAL", "CALL", "REPEAT_CLIENT", "OTHER"];
 
@@ -20,6 +21,11 @@ function Err({ state, name }: { state: FormState; name: string }) {
 
 export function LeadForm({ agents, properties, canAssign }: LeadFormProps) {
   const [state, action, pending] = useActionState<FormState, FormData>(createLead, {});
+  // City helper is local-state-only — it narrows the area datalist but isn't
+  // submitted as a field (Lead has no prefCity column).
+  const areaListId = useId();
+  const [cityHint, setCityHint] = useState<string>("");
+  const areas = useMemo(() => suggestedAreas(cityHint || null), [cityHint]);
 
   return (
     <form action={action} className="space-y-6">
@@ -63,7 +69,36 @@ export function LeadForm({ agents, properties, canAssign }: LeadFormProps) {
           </div>
           <div><label className="label" htmlFor="budgetMin">Budget min (PKR)</label><input id="budgetMin" name="budgetMin" type="number" min="0" className="field" /></div>
           <div><label className="label" htmlFor="budgetMax">Budget max (PKR)</label><input id="budgetMax" name="budgetMax" type="number" min="0" className="field" /></div>
-          <div><label className="label" htmlFor="prefArea">Preferred area</label><input id="prefArea" name="prefArea" className="field" /></div>
+          <div>
+            <label className="label" htmlFor="prefCityHint">Preferred city</label>
+            <select
+              id="prefCityHint"
+              value={cityHint}
+              onChange={(e) => setCityHint(e.target.value)}
+              className="field"
+            >
+              <option value="">— Any —</option>
+              {PK_CITIES.map((c) => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="label" htmlFor="prefArea">Preferred area</label>
+            <input
+              id="prefArea"
+              name="prefArea"
+              list={areaListId}
+              className="field"
+              autoComplete="off"
+              placeholder={cityHint ? `Areas in ${cityHint}` : "Type or pick a locality"}
+            />
+            <datalist id={areaListId}>
+              {areas.map((a) => (
+                <option key={a} value={a} />
+              ))}
+            </datalist>
+          </div>
           <div className="sm:col-span-2"><label className="label" htmlFor="requirements">Requirements</label><textarea id="requirements" name="requirements" rows={3} className="field" /></div>
         </div>
       </div>

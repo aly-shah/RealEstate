@@ -8,8 +8,15 @@ import { money, compactMoney, humanize, fmtDate, toNumber } from "@/lib/format";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Section } from "@/components/ui/Section";
 import { StatusBadge } from "@/components/ui/Badge";
-import { DealStatusChanger, GenerateCommissionForm, RecordPaymentForm } from "@/components/deal/DealControls";
+import {
+  DealStatusChanger,
+  GenerateCommissionForm,
+  RecordPaymentForm,
+  CreateInvoiceForm,
+} from "@/components/deal/DealControls";
 import { markPaymentPaid } from "@/app/(app)/payments/actions";
+import { WhatsAppButton } from "@/components/whatsapp/WhatsAppButton";
+import { TEMPLATES } from "@/lib/whatsapp";
 
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -37,14 +44,27 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
       payments: { orderBy: { createdAt: "asc" } },
       commission: { include: { shares: true } },
       documents: true,
+      invoices: {
+        include: { payments: { where: { status: "PAID" }, select: { amount: true } } },
+        orderBy: { issuedAt: "desc" },
+      },
     },
   });
   if (!deal) notFound();
+
+  // Company name + WhatsApp signature override drive the templates below.
+  const company = await prisma.company.findUnique({
+    where: { id: user.companyId },
+    select: { name: true, whatsappSignature: true },
+  });
+  const mainAgent = deal.agents.find((a) => a.role === "MAIN")?.agent;
 
   const value = toNumber(deal.sale?.salePrice ?? deal.rental?.monthlyRent);
   const paid = deal.payments.filter((p) => p.status === "PAID").reduce((s, p) => s + toNumber(p.amount), 0);
   const office = can(user.role, "recordDeals");
   const suggestedComm = Math.round(value * 0.02);
+  const now = new Date();
+  const canBill = can(user.role, "managePayments");
 
   return (
     <div>
@@ -54,6 +74,12 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
         subtitle={deal.client ? `Client: ${deal.client.name}` : undefined}
         action={<StatusBadge status={deal.status} />}
       />
+
+      {deal.status === "CLOSED_LOST" && deal.lostReason && (
+        <p className="mb-4 rounded-xl border border-danger/30 bg-danger-bg px-3 py-2 text-sm text-danger">
+          <span className="font-semibold">Lost:</span> {deal.lostReason}
+        </p>
+      )}
 
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="space-y-6 lg:col-span-2">
@@ -84,29 +110,75 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
               <p className="mb-3 text-sm text-muted">No payments recorded.</p>
             ) : (
               <ul className="mb-3 divide-y divide-line">
-                {deal.payments.map((p) => (
-                  <li key={p.id} className="flex items-center justify-between py-2 text-sm">
-                    <div>
-                      <span className="font-medium text-ink">{humanize(p.type)}</span>
-                      <span className="ml-2 text-muted">{money(p.amount)}</span>
-                      {p.dueDate && p.status !== "PAID" && <span className="ml-2 text-xs text-muted">due {fmtDate(p.dueDate)}</span>}
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <StatusBadge status={p.status} />
-                      {p.status === "PAID" ? (
-                        <a href={`/receipts/${p.id}`} target="_blank" rel="noopener noreferrer" className="btn-ghost px-2 py-1 text-xs">Receipt</a>
-                      ) : office ? (
-                        <form action={markPaymentPaid}>
-                          <input type="hidden" name="id" value={p.id} />
-                          <button className="btn-ghost px-2 py-1 text-xs">Mark paid</button>
-                        </form>
-                      ) : null}
-                    </div>
-                  </li>
-                ))}
+                {deal.payments.map((p) => {
+                  // Auto-classify overdue at render time so the badge updates
+                  // without needing a background job to flip the stored status.
+                  const isOverdue = p.status !== "PAID" && !!p.dueDate && p.dueDate < now;
+                  return (
+                    <li key={p.id} className="flex items-center justify-between py-2 text-sm">
+                      <div>
+                        <span className="font-medium text-ink">{humanize(p.type)}</span>
+                        <span className="ml-2 text-muted">{money(p.amount)}</span>
+                        {p.dueDate && p.status !== "PAID" && (
+                          <span className={`ml-2 text-xs ${isOverdue ? "text-danger font-medium" : "text-muted"}`}>
+                            due {fmtDate(p.dueDate)}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {isOverdue ? <StatusBadge status="OVERDUE" /> : <StatusBadge status={p.status} />}
+                        {p.status === "PAID" ? (
+                          <a href={`/receipts/${p.id}`} target="_blank" rel="noopener noreferrer" className="btn-ghost px-2 py-1 text-xs">Receipt</a>
+                        ) : office ? (
+                          <form action={markPaymentPaid}>
+                            <input type="hidden" name="id" value={p.id} />
+                            <button className="btn-ghost px-2 py-1 text-xs">Mark paid</button>
+                          </form>
+                        ) : null}
+                      </div>
+                    </li>
+                  );
+                })}
               </ul>
             )}
             {office && <RecordPaymentForm dealId={deal.id} isRental={deal.type === "RENTAL"} />}
+          </Section>
+
+          <Section
+            title="Invoices"
+            action={canBill ? <span className="text-xs text-muted">{deal.invoices.length} on file</span> : null}
+          >
+            {deal.invoices.length === 0 ? (
+              <p className="mb-3 text-sm text-muted">No invoices issued yet.</p>
+            ) : (
+              <ul className="mb-3 divide-y divide-line">
+                {deal.invoices.map((inv) => {
+                  const invPaid = inv.payments.reduce((s, p) => s + toNumber(p.amount), 0);
+                  const balance = Math.max(0, toNumber(inv.amount) - invPaid);
+                  const isOverdue =
+                    inv.status === "ISSUED" && !!inv.dueDate && inv.dueDate < now;
+                  return (
+                    <li key={inv.id} className="flex items-center justify-between py-2 text-sm">
+                      <div>
+                        <a
+                          href={`/invoices/${inv.id}`}
+                          className="font-medium text-ink hover:text-accent"
+                          data-keep-latin
+                        >
+                          {inv.number}
+                        </a>
+                        <span className="ml-2 text-muted">{money(inv.amount)}</span>
+                        {balance > 0 && inv.status === "ISSUED" && (
+                          <span className="ml-2 text-xs text-muted">balance {money(balance)}</span>
+                        )}
+                      </div>
+                      {isOverdue ? <StatusBadge status="OVERDUE" /> : <StatusBadge status={inv.status} />}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+            {canBill && <CreateInvoiceForm dealId={deal.id} suggestedAmount={value} />}
           </Section>
 
           <Section title="Commission">
@@ -142,7 +214,7 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
           </Section>
         </div>
 
-        <div className="space-y-6">
+        <div className="space-y-6 right-rail">
           {office && (
             <Section title="Deal status">
               <DealStatusChanger id={deal.id} current={deal.status} />
@@ -153,6 +225,41 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
             <Row label="Property" value={<Link href={`/properties/${deal.property.id}`} className="text-accent">{deal.property.reference}</Link>} />
             <Row label="Client" value={deal.client?.name ?? "—"} />
             <Row label="Dealer" value={deal.dealer ? <Link href={`/dealers/${deal.dealer.id}`} className="text-accent">{deal.dealer.name}</Link> : "—"} />
+
+            {/* Quick WhatsApp links — one per counterparty when they have a phone on file. */}
+            {(deal.client?.phone || deal.dealer?.contact) && (
+              <div className="mt-3 flex flex-wrap gap-2">
+                {deal.client?.phone && (
+                  <WhatsAppButton
+                    phone={deal.client.phone}
+                    label="WhatsApp client"
+                    message={TEMPLATES.dealUpdate({
+                      clientName: deal.client.name,
+                      agentName: mainAgent?.name,
+                      companyName: company?.name ?? "the team",
+                      signature: company?.whatsappSignature,
+                      dealRef: deal.reference,
+                      stage: deal.status,
+                    })}
+                  />
+                )}
+                {deal.dealer?.contact && (
+                  <WhatsAppButton
+                    phone={deal.dealer.contact}
+                    label="WhatsApp dealer"
+                    message={TEMPLATES.dealUpdate({
+                      clientName: deal.dealer.name,
+                      agentName: mainAgent?.name,
+                      companyName: company?.name ?? "the team",
+                      signature: company?.whatsappSignature,
+                      dealRef: deal.reference,
+                      stage: deal.status,
+                    })}
+                  />
+                )}
+              </div>
+            )}
+
             <div className="pt-2">
               <p className="mb-1 text-xs font-semibold uppercase text-muted">Agents</p>
               <ul className="space-y-1">

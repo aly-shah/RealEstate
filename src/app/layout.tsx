@@ -21,9 +21,9 @@ const urdu = Noto_Sans_Arabic({
 });
 
 export const metadata: Metadata = {
-  title: "promptzer — Real Estate CRM / ERP",
+  title: "Proptimizr — Real Estate CRM / ERP",
   description:
-    "Enterprise back-office for real estate agencies: properties, leads, agents, dealers, deals, commissions, payments and reporting.",
+    "Proptimizr is the back-office for Pakistani real estate agencies: properties, leads, agents, dealers, deals, commissions, payments and reporting.",
 };
 
 export default async function RootLayout({

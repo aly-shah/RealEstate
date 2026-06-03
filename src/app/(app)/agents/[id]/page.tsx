@@ -6,6 +6,7 @@ import { can } from "@/lib/rbac";
 import { agentLeaderboard } from "@/lib/metrics";
 import { toNumber, compactMoney, money, humanize, fmtDate, fmtDateTime, initials } from "@/lib/format";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { LastSeenPill } from "@/components/ui/LastSeenPill";
 import { Section } from "@/components/ui/Section";
 import { StatCard } from "@/components/ui/StatCard";
 import { StatusBadge, Badge } from "@/components/ui/Badge";
@@ -111,6 +112,7 @@ export default async function AgentDetailPage({ params }: { params: Promise<{ id
         subtitle={[agent.email, agent.phone].filter(Boolean).join(" · ")}
         action={
           <div className="flex items-center gap-3">
+            <LastSeenPill lastSeenAt={agent.lastSeenAt} showNever />
             {rank && <Badge tone={rank === 1 ? "ink" : "neutral"}>Leaderboard #{rank}</Badge>}
             <span className="grid h-11 w-11 place-items-center rounded-full bg-ink text-sm font-semibold text-white">
               {initials(agent.name)}

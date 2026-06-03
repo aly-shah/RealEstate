@@ -5,8 +5,9 @@ interface BrandProps {
 }
 
 /**
- * promptzer mark: a soft-cornered gradient tile with a stylized roof + door,
- * paired with a tight modern wordmark.
+ * Proptimizr mark: a soft-cornered gradient tile with a stylized roof + door,
+ * paired with a tight modern wordmark. Used in the sidebar, login header, and
+ * receipt/invoice PDFs — anywhere we need an inline lockup of the product.
  */
 export function Brand({ className = "", variant = "light", size = "md" }: BrandProps) {
   const text = variant === "dark" ? "text-white" : "text-ink";
@@ -29,7 +30,7 @@ export function Brand({ className = "", variant = "light", size = "md" }: BrandP
         </svg>
       </span>
       <span className={`${word} font-semibold tracking-tight ${text}`}>
-        promptzer
+        Proptimizr
       </span>
     </span>
   );

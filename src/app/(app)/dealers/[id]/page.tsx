@@ -7,6 +7,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Section } from "@/components/ui/Section";
 import { StatCard } from "@/components/ui/StatCard";
 import { StatusBadge } from "@/components/ui/Badge";
+import { WhatsAppButton } from "@/components/whatsapp/WhatsAppButton";
 
 export default async function DealerDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -35,7 +36,19 @@ export default async function DealerDetailPage({ params }: { params: Promise<{ i
         eyebrow="Dealer"
         title={dealer.name}
         subtitle={[dealer.companyName, dealer.areaOfOperation].filter(Boolean).join(" · ") || undefined}
-        action={<StatusBadge status={dealer.status} />}
+        action={
+          <div className="flex items-center gap-2">
+            <WhatsAppButton
+              phone={dealer.contact}
+              label="WhatsApp"
+              size="md"
+              // A short opener fits the dealer relationship — they're a counterparty,
+              // not a client, so we skip the "Salaam" + "thanks for reaching out" framing.
+              message={`Hi ${dealer.name}, following up about ${dealer.areaOfOperation ? dealer.areaOfOperation + " " : ""}inventory.`}
+            />
+            <StatusBadge status={dealer.status} />
+          </div>
+        }
       />
 
       <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">

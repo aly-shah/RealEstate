@@ -9,6 +9,8 @@ import { StatCard } from "@/components/ui/StatCard";
 import { Badge } from "@/components/ui/Badge";
 import { FilterBar } from "@/components/ui/FilterBar";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { Pagination } from "@/components/ui/Pagination";
+import { parsePage } from "@/lib/pagination";
 import { ActivityTrend, EntityBreakdown } from "@/components/activity/ActivityCharts";
 
 const ENTITY_TYPES = ["PROPERTY", "LEAD", "DEAL", "COMMISSION", "USER", "DOCUMENT", "PAYMENT", "COMMISSION_RULE"] as const;
@@ -37,11 +39,12 @@ function relative(date: Date): string {
 export default async function ActivityPage({
   searchParams,
 }: {
-  searchParams: Promise<{ entity?: string; user?: string }>;
+  searchParams: Promise<{ entity?: string; user?: string; page?: string; pageSize?: string }>;
 }) {
   const me = await requireCapability("viewCompanyReports");
   const companyId = me.companyId!;
   const sp = await searchParams;
+  const { page, pageSize, skip } = parsePage(sp, 50);
 
   const filterWhere: Prisma.ActivityLogWhereInput = {
     companyId,
@@ -52,8 +55,9 @@ export default async function ActivityPage({
   const startOfToday = (() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; })();
   const sevenDaysAgo = (() => { const d = new Date(); d.setDate(d.getDate() - 7); return d; })();
 
-  const [logs, users, last30, byEntity, todayCount, weekCount] = await Promise.all([
-    prisma.activityLog.findMany({ where: filterWhere, include: { user: true }, orderBy: { createdAt: "desc" }, take: 150 }),
+  const [logs, logsTotal, users, last30, byEntity, todayCount, weekCount] = await Promise.all([
+    prisma.activityLog.findMany({ where: filterWhere, include: { user: true }, orderBy: { createdAt: "desc" }, skip, take: pageSize }),
+    prisma.activityLog.count({ where: filterWhere }),
     prisma.user.findMany({ where: { companyId }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
     prisma.activityLog.findMany({ where: { companyId, createdAt: { gte: since } }, select: { createdAt: true, userId: true, user: { select: { name: true } } } }),
     prisma.activityLog.groupBy({ by: ["entityType"], where: { companyId, createdAt: { gte: since } }, _count: { _all: true } }),
@@ -148,6 +152,7 @@ export default async function ActivityPage({
       {logs.length === 0 ? (
         <EmptyState title="No matching activity" hint="Try clearing filters above." />
       ) : (
+        <>
         <div className="space-y-6">
           {[...groups.entries()].map(([k, items]) => (
             <section key={k} className="surface overflow-hidden">
@@ -188,6 +193,8 @@ export default async function ActivityPage({
             </section>
           ))}
         </div>
+        <Pagination total={logsTotal} page={page} pageSize={pageSize} />
+        </>
       )}
     </div>
   );

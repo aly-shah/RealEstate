@@ -66,5 +66,24 @@ export async function setEventStatus(formData: FormData): Promise<void> {
   if (user.role === "AGENT" && event.agentId !== user.id) return;
 
   await prisma.calendarEvent.update({ where: { id }, data: { status } });
+
+  // Phase-7 refinement: marking a contact-style event DONE counts as a real
+  // touch on the linked lead. Stays no-op for SCHEDULED/CANCELLED/MISSED
+  // transitions and for non-contact event types (PAYMENT_REMINDER etc.).
+  if (
+    String(status) === "DONE" &&
+    event.leadId &&
+    (event.type === "FOLLOW_UP" || event.type === "MEETING" || event.type === "SHOWING")
+  ) {
+    await prisma.lead.updateMany({
+      where: {
+        id: event.leadId,
+        companyId: user.companyId,
+        stage: { notIn: ["CLOSED_WON", "CLOSED_LOST"] },
+      },
+      data: { lastContactedAt: new Date() },
+    });
+  }
+
   revalidatePath("/calendar");
 }

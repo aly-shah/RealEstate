@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { auth } from "@/auth";
 import { UPLOAD_ROOT, contentTypeFor } from "@/lib/uploads";
+import { isUserActive } from "@/lib/user-status";
 
 export const runtime = "nodejs";
 
@@ -14,6 +15,11 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ pat
   const session = await auth();
   const user = session?.user;
   if (!user) return new NextResponse("Unauthorized", { status: 401 });
+
+  // Suspension re-check (same reasoning as /api/upload).
+  if (!(await isUserActive(user.id, user.role))) {
+    return new NextResponse("Forbidden", { status: 403 });
+  }
 
   const segments = (await params).path;
   const [companyId, ...rest] = segments;

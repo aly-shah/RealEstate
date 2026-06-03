@@ -22,11 +22,13 @@ export const NAV: NavItem[] = [
 
   { href: "/leads",         label: "Leads",         icon: "target",     roles: ["OWNER", "ADMIN", "AGENT"], group: "sales" },
   { href: "/deals",         label: "Deals",         icon: "exchange",   roles: ALL,                          group: "sales" },
+  { href: "/whatsapp",      label: "WhatsApp inbox",icon: "message",    roles: OFFICE,                       group: "sales" },
 
   { href: "/calendar",      label: "Calendar",      icon: "calendar",   roles: ["OWNER", "ADMIN", "AGENT"], group: "field" },
   { href: "/visits",        label: "Visits",        icon: "flag",       roles: ["OWNER", "ADMIN", "AGENT"], group: "field" },
 
   { href: "/commissions",   label: "Commissions",   icon: "percent",    roles: ALL,                          group: "finance" },
+  { href: "/invoices",      label: "Invoices",      icon: "document",   roles: OFFICE,                       group: "finance" },
   { href: "/payments",      label: "Payments",      icon: "banknote",   roles: OFFICE,                       group: "finance" },
 
   { href: "/agents",        label: "Agents",        icon: "users",      roles: OFFICE,                       group: "people" },
@@ -52,7 +54,10 @@ export const GROUP_LABELS: Record<NavGroup, string> = {
 
 export function navForRole(role: Role): NavItem[] {
   if (role === "SUPER_ADMIN") {
-    return [{ href: "/admin/companies", label: "Companies", icon: "building", roles: ["SUPER_ADMIN"], group: "workspace" }];
+    return [
+      { href: "/admin/companies", label: "Companies", icon: "building", roles: ["SUPER_ADMIN"], group: "workspace" },
+      { href: "/admin/jobs",      label: "Jobs",      icon: "activity", roles: ["SUPER_ADMIN"], group: "system" },
+    ];
   }
   return NAV.filter((item) => item.roles.includes(role));
 }

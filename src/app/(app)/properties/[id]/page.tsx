@@ -10,9 +10,12 @@ import { Section } from "@/components/ui/Section";
 import { StatusBadge } from "@/components/ui/Badge";
 import { Timeline } from "@/components/ui/Timeline";
 import { StatusChanger } from "@/components/property/StatusChanger";
+import { PropertyAgentManager } from "@/components/property/PropertyAgentManager";
 import { PropertyGallery } from "@/components/property/PropertyGallery";
 import { MapView } from "@/components/map/MapView";
-import { compactMoney } from "@/lib/format";
+import { compactMoney, toNumber } from "@/lib/format";
+import { WhatsAppButton } from "@/components/whatsapp/WhatsAppButton";
+import { TEMPLATES } from "@/lib/whatsapp";
 
 function Detail({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -43,11 +46,42 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
   });
   if (!property) notFound();
 
-  const activity = await prisma.activityLog.findMany({
-    where: { companyId: user.companyId, entityType: "PROPERTY", entityId: id },
-    include: { user: true },
-    orderBy: { createdAt: "desc" },
-    take: 25,
+  const isOffice = user.role === "OWNER" || user.role === "ADMIN";
+
+  const [activity, companyAgents, company] = await Promise.all([
+    prisma.activityLog.findMany({
+      where: { companyId: user.companyId, entityType: "PROPERTY", entityId: id },
+      include: { user: true },
+      orderBy: { createdAt: "desc" },
+      take: 25,
+    }),
+    isOffice
+      ? prisma.user.findMany({
+          where: { companyId: user.companyId, role: "AGENT", status: "ACTIVE" },
+          select: { id: true, name: true },
+          orderBy: { name: "asc" },
+        })
+      : Promise.resolve([]),
+    // Company name + WhatsApp signature override drive the templates below.
+    prisma.company.findUnique({
+      where: { id: user.companyId },
+      select: { name: true, whatsappSignature: true },
+    }),
+  ]);
+
+  // Pre-build the propertyDetails template once — both supplier buttons share it.
+  const propertyMessage = TEMPLATES.propertyDetails({
+    clientName: null,
+    agentName: user.name,
+    companyName: company?.name ?? "the team",
+    signature: company?.whatsappSignature,
+    property: {
+      reference: property.reference,
+      title: property.title,
+      salePrice: property.salePrice ? toNumber(property.salePrice) : undefined,
+      monthlyRent: property.monthlyRent ? toNumber(property.monthlyRent) : undefined,
+      area: property.area,
+    },
   });
 
   return (
@@ -145,7 +179,7 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
           </Section>
         </div>
 
-        <div className="space-y-6">
+        <div className="space-y-6 right-rail">
           {can(user.role, "manageProperties") && (
             <Section title="Change status">
               <StatusChanger id={property.id} current={property.status} />
@@ -155,9 +189,25 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
           <Section title="People">
             <Detail label="Supplier" value={property.dealer?.name ?? property.ownerName} />
             <Detail label="Owner phone" value={property.ownerPhone} />
+            {/* WhatsApp the supplier (dealer takes priority over inline owner). */}
+            {(property.dealer?.contact || property.ownerPhone) && (
+              <div className="mt-2 flex flex-wrap gap-2">
+                <WhatsAppButton
+                  phone={property.dealer?.contact ?? property.ownerPhone}
+                  label={`WhatsApp ${property.dealer ? "dealer" : "owner"}`}
+                  message={propertyMessage}
+                />
+              </div>
+            )}
             <div className="mt-2">
               <p className="mb-1 text-xs font-semibold uppercase text-muted">Assigned agents</p>
-              {property.agents.length === 0 ? (
+              {isOffice ? (
+                <PropertyAgentManager
+                  propertyId={property.id}
+                  assigned={property.agents.map((a) => ({ id: a.agentId, name: a.agent.name }))}
+                  available={companyAgents}
+                />
+              ) : property.agents.length === 0 ? (
                 <p className="text-sm text-muted">None</p>
               ) : (
                 <ul className="space-y-1">

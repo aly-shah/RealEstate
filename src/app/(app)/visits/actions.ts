@@ -33,12 +33,34 @@ export async function recordShowing(_prev: FormState, formData: FormData): Promi
   const lng = d.lng ? Number(d.lng) : null;
   const now = new Date();
 
+  // Infer the lead this visit belongs to: at most one active (non-closed)
+  // lead per (client, property) in normal use. When the inference is
+  // ambiguous (zero or multiple matches) we leave leadId null — the
+  // historical record still ties to the client/property, and the lead
+  // detail page just won't list this particular visit until it's
+  // back-filled manually. Skipped entirely when no clientId.
+  let leadId: string | null = null;
+  if (d.clientId) {
+    const candidates = await prisma.lead.findMany({
+      where: {
+        companyId: user.companyId,
+        clientId: d.clientId,
+        propertyId: d.propertyId,
+        stage: { notIn: ["CLOSED_WON", "CLOSED_LOST"] },
+      },
+      select: { id: true },
+      take: 2,
+    });
+    if (candidates.length === 1) leadId = candidates[0].id;
+  }
+
   const showing = await prisma.showing.create({
     data: {
       companyId: user.companyId,
       agentId: user.id,
       propertyId: d.propertyId,
       clientId: d.clientId || null,
+      leadId,
       checkInAt: now,
       checkOutAt: now,
       checkInLat: lat,
@@ -60,6 +82,20 @@ export async function recordShowing(_prev: FormState, formData: FormData): Promi
     summary: "Property shown — visit recorded",
     meta: { showingId: showing.id },
   });
+
+  // Phase-7 refinement: bump lastContactedAt on any active lead this client
+  // owns, so stale-lead detection sees the visit as a real touch. Limit to
+  // non-closed leads — closed leads don't get "refreshed" by ambient activity.
+  if (d.clientId) {
+    await prisma.lead.updateMany({
+      where: {
+        companyId: user.companyId,
+        clientId: d.clientId,
+        stage: { notIn: ["CLOSED_WON", "CLOSED_LOST"] },
+      },
+      data: { lastContactedAt: now },
+    });
+  }
 
   revalidatePath("/visits");
   return { ok: true };

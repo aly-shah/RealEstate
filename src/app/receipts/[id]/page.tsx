@@ -85,8 +85,13 @@ export default async function ReceiptPage({ params }: { params: Promise<{ id: st
             </tfoot>
           </table>
 
-          {/* Footer */}
-          <div className="mt-6 flex items-end justify-between border-t border-line pt-6">
+          {/* Footer — receipt-specific note above the status/timestamp row. */}
+          {payment.company.receiptFooter && (
+            <p className="mt-6 border-t border-line pt-4 text-xs text-muted">
+              {payment.company.receiptFooter}
+            </p>
+          )}
+          <div className={`flex items-end justify-between ${payment.company.receiptFooter ? "mt-3" : "mt-6 border-t border-line pt-6"}`}>
             <div>
               <p className="text-xs text-muted">Status</p>
               <p className="text-sm font-medium text-ink">{humanize(payment.status)}</p>

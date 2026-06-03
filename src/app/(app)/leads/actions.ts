@@ -9,6 +9,8 @@ import { requireCompanyUser } from "@/lib/session";
 import { can } from "@/lib/rbac";
 import { logActivity, notify } from "@/lib/activity";
 import { humanize } from "@/lib/format";
+import { scheduleAutoFollowUp } from "@/lib/lead-followups";
+import { setFlash } from "@/lib/flash";
 
 const leadSchema = z.object({
   clientName: z.string().min(2, "Client name is required"),
@@ -40,19 +42,55 @@ export async function createLead(_prev: FormState, formData: FormData): Promise<
   // Agents create leads assigned to themselves; office roles may pick an agent.
   const agentId = user.role === "AGENT" ? user.id : d.agentId || null;
 
-  const client = await prisma.client.create({
-    data: {
-      companyId: user.companyId,
-      name: d.clientName,
-      phone: d.clientPhone || null,
-      email: d.clientEmail || null,
-    },
-  });
+  // De-dup: prefer phone match (most reliable), then email. Within the same
+  // company only. If multiple candidates match, pick the most recently used —
+  // safer than picking arbitrarily and produces a stable "this is the same
+  // person" result for ops staff. Backfill missing fields from this lead.
+  const phone = d.clientPhone?.trim() || null;
+  const email = d.clientEmail?.trim().toLowerCase() || null;
+
+  let client: Awaited<ReturnType<typeof prisma.client.findFirst>> = null;
+  let reusedExisting = false;
+  if (phone || email) {
+    client = await prisma.client.findFirst({
+      where: {
+        companyId: user.companyId,
+        OR: [
+          ...(phone ? [{ phone }] : []),
+          ...(email ? [{ email }] : []),
+        ],
+      },
+      orderBy: { createdAt: "desc" },
+    });
+  }
+
+  if (client) {
+    reusedExisting = true;
+    // Backfill any field the existing client is missing — never overwrite.
+    const updates: Record<string, string> = {};
+    if (!client.phone && phone) updates.phone = phone;
+    if (!client.email && email) updates.email = email;
+    if (!client.name && d.clientName) updates.name = d.clientName;
+    if (Object.keys(updates).length > 0) {
+      client = await prisma.client.update({ where: { id: client.id }, data: updates });
+    }
+  } else {
+    client = await prisma.client.create({
+      data: {
+        companyId: user.companyId,
+        name: d.clientName,
+        phone,
+        email,
+      },
+    });
+  }
+  // Both branches assign — narrow for the rest of the function.
+  const linkedClient = client!;
 
   const lead = await prisma.lead.create({
     data: {
       companyId: user.companyId,
-      clientId: client.id,
+      clientId: linkedClient.id,
       agentId,
       propertyId: d.propertyId || null,
       source: d.source,
@@ -69,7 +107,10 @@ export async function createLead(_prev: FormState, formData: FormData): Promise<
     action: "lead.created",
     entityType: "LEAD",
     entityId: lead.id,
-    summary: `New lead: ${client.name} (${humanize(d.source)})`,
+    summary: reusedExisting
+      ? `New lead for existing client ${linkedClient.name} (${humanize(d.source)})`
+      : `New lead: ${linkedClient.name} (${humanize(d.source)})`,
+    meta: { clientReused: reusedExisting, clientId: linkedClient.id },
   });
 
   if (agentId && agentId !== user.id) {
@@ -78,8 +119,29 @@ export async function createLead(_prev: FormState, formData: FormData): Promise<
       userId: agentId,
       type: "LEAD_ASSIGNED",
       title: "New lead assigned to you",
-      body: client.name,
+      body: linkedClient.name,
       link: `/leads/${lead.id}`,
+    });
+  }
+
+  // Phase 4: auto-schedule the first follow-up. No-op when there's no agent
+  // assigned yet (office can pick "Unassigned" — a later assignment will trigger).
+  const followUpId = await scheduleAutoFollowUp({
+    leadId: lead.id,
+    companyId: user.companyId,
+    agentId,
+    stage: lead.stage,
+    clientName: linkedClient.name,
+  });
+  if (followUpId) {
+    await logActivity({
+      companyId: user.companyId,
+      userId: user.id,
+      action: "lead.followup_scheduled",
+      entityType: "LEAD",
+      entityId: lead.id,
+      summary: `Auto follow-up scheduled for ${linkedClient.name}`,
+      meta: { eventId: followUpId, stage: lead.stage },
     });
   }
 
@@ -98,6 +160,8 @@ export async function advanceStage(formData: FormData): Promise<void> {
   // Agents can only move their own leads.
   if (user.role === "AGENT" && lead.agentId !== user.id) return;
 
+  if (lead.stage === stage) return; // no-op; avoids log noise
+
   await prisma.lead.update({
     where: { id },
     data: { stage, lostReason: stage === "CLOSED_LOST" ? lostReason : null },
@@ -109,8 +173,113 @@ export async function advanceStage(formData: FormData): Promise<void> {
     entityType: "LEAD",
     entityId: id,
     summary: `Stage → ${humanize(String(stage))}`,
+    meta: {
+      from: lead.stage,
+      to: String(stage),
+      ...(stage === "CLOSED_LOST" && lostReason ? { lostReason } : {}),
+    },
+  });
+
+  // Phase 4: when a lead progresses to CONTACTED or INTERESTED, ensure
+  // there's a future follow-up on the calendar. The helper dedup-checks
+  // existing events so re-running the same stage transition is harmless.
+  if ((stage === "CONTACTED" || stage === "INTERESTED") && lead.agentId) {
+    const client = lead.clientId
+      ? await prisma.client.findUnique({ where: { id: lead.clientId }, select: { name: true } })
+      : null;
+    const eventId = await scheduleAutoFollowUp({
+      leadId: id,
+      companyId: user.companyId,
+      agentId: lead.agentId,
+      stage: stage as "CONTACTED" | "INTERESTED",
+      clientName: client?.name ?? null,
+    });
+    if (eventId) {
+      await logActivity({
+        companyId: user.companyId,
+        userId: user.id,
+        action: "lead.followup_scheduled",
+        entityType: "LEAD",
+        entityId: id,
+        summary: `Auto follow-up scheduled (${humanize(String(stage))})`,
+        meta: { eventId, stage: String(stage) },
+      });
+    }
+  }
+
+  revalidatePath(`/leads/${id}`);
+  revalidatePath("/leads");
+}
+
+/**
+ * Office-only — pin the lead's hot/warm/cold band, or clear back to "auto".
+ * The Lead row carries the override; computation lives in lib/lead-score.ts.
+ */
+export async function setLeadScoreOverride(formData: FormData): Promise<void> {
+  const user = await requireCompanyUser();
+  if (!can(user.role, "assignLeadsCalendars")) return;
+
+  const id = String(formData.get("leadId"));
+  const raw = String(formData.get("override") || "");
+  // Empty string clears the override (back to auto).
+  const next = raw === "HOT" || raw === "WARM" || raw === "COLD" ? raw : null;
+
+  const lead = await prisma.lead.findFirst({
+    where: { id, companyId: user.companyId },
+    select: { scoreOverride: true },
+  });
+  if (!lead) return;
+  if (lead.scoreOverride === next) return; // no-op
+
+  await prisma.lead.update({ where: { id }, data: { scoreOverride: next } });
+  await logActivity({
+    companyId: user.companyId,
+    userId: user.id,
+    action: "lead.score_override",
+    entityType: "LEAD",
+    entityId: id,
+    summary: next ? `Pinned score to ${next}` : "Cleared score override",
+    meta: { from: lead.scoreOverride, to: next },
   });
   revalidatePath(`/leads/${id}`);
+  revalidatePath("/leads");
+}
+
+/**
+ * Attach a suggested property to a lead — used by the PropertyMatches list
+ * on the lead detail page. Tenant-checks both records before writing.
+ */
+export async function attachPropertyToLead(formData: FormData): Promise<void> {
+  const user = await requireCompanyUser();
+  if (!can(user.role, "updateLeadsVisits")) return;
+
+  const leadId = String(formData.get("leadId"));
+  const propertyId = String(formData.get("propertyId"));
+  if (!leadId || !propertyId) return;
+
+  const [lead, property] = await Promise.all([
+    prisma.lead.findFirst({ where: { id: leadId, companyId: user.companyId } }),
+    prisma.property.findFirst({
+      where: { id: propertyId, companyId: user.companyId },
+      select: { id: true, reference: true, title: true },
+    }),
+  ]);
+  if (!lead || !property) return;
+  // Agents only get to touch their own leads (matches existing advanceStage gate).
+  if (user.role === "AGENT" && lead.agentId !== user.id) return;
+  if (lead.propertyId === propertyId) return; // already linked
+
+  await prisma.lead.update({ where: { id: leadId }, data: { propertyId } });
+  await logActivity({
+    companyId: user.companyId,
+    userId: user.id,
+    action: "lead.attach_property",
+    entityType: "LEAD",
+    entityId: leadId,
+    summary: `Attached ${property.reference} — ${property.title}`,
+    meta: { from: lead.propertyId, to: propertyId },
+  });
+  revalidatePath(`/leads/${leadId}`);
   revalidatePath("/leads");
 }
 
@@ -125,7 +294,10 @@ export async function assignAgent(formData: FormData): Promise<void> {
   if (!lead) return;
 
   await prisma.lead.update({ where: { id }, data: { agentId } });
+  let assignedName: string | null = null;
   if (agentId) {
+    const agent = await prisma.user.findUnique({ where: { id: agentId }, select: { name: true } });
+    assignedName = agent?.name ?? null;
     await notify({
       companyId: user.companyId,
       userId: agentId,
@@ -141,6 +313,10 @@ export async function assignAgent(formData: FormData): Promise<void> {
     entityType: "LEAD",
     entityId: id,
     summary: "Lead reassigned",
+  });
+  await setFlash({
+    tone: "ok",
+    message: assignedName ? `Lead reassigned to ${assignedName}.` : "Lead set to unassigned.",
   });
   revalidatePath(`/leads/${id}`);
 }

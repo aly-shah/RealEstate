@@ -7,12 +7,33 @@ import {
   outstandingPayments,
   agentLeaderboard,
   inventorySnapshot,
+  payoutSummary,
 } from "@/lib/metrics";
 import { money, compactMoney, humanize, toNumber } from "@/lib/format";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Section } from "@/components/ui/Section";
 import { StatCard } from "@/components/ui/StatCard";
 import { RevenueTrend, LeadFunnel } from "@/components/reports/ReportCharts";
+import {
+  parseDateRange,
+  fmtIsoDate,
+  monthlySalesVsRentals,
+  leadSourceConversion,
+  funnelDropoff,
+  paymentOverdueAging,
+  propertyInventoryAging,
+  visitVerificationStats,
+} from "@/lib/reports";
+import { DateRangeFilter } from "@/components/reports/DateRangeFilter";
+import { OwnerInsightPanel } from "@/components/reports/OwnerInsightPanel";
+import { aiUsageSnapshot } from "@/lib/ai/budget";
+import {
+  SalesVsRentalsChart,
+  SourceConversionChart,
+  FunnelDropoffChart,
+  OverdueAgingChart,
+  InventoryAgingChart,
+} from "@/components/reports/Phase7Charts";
 
 function BarRow({ label, value, max }: { label: string; value: number; max: number }) {
   const pct = max ? Math.round((value / max) * 100) : 0;
@@ -27,14 +48,29 @@ function BarRow({ label, value, max }: { label: string; value: number; max: numb
   );
 }
 
-export default async function ReportsPage() {
+export default async function ReportsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ from?: string; to?: string }>;
+}) {
   const user = await requireCapability("viewCompanyReports");
   const companyId = user.companyId!;
+  const sp = await searchParams;
+  // Date range gates the new Phase-7 widgets. The legacy "this month" widgets
+  // keep using monthStart() so existing dashboards/exports stay stable.
+  const range = parseDateRange(sp);
   const since = monthStart();
+
+  // Phase-9: surface the AI weekly-insight panel only when AI is enabled
+  // for this tenant + server. requireCapability already restricts the page
+  // to OWNER/ADMIN/SUPER_ADMIN, so we don't re-check role here.
+  const ai = await aiUsageSnapshot(companyId);
+  const showAi = !!ai && ai.serverConfigured && ai.aiEnabled && ai.limit > 0;
 
   const [
     revMonth, revAll, comm, pay, board, inv,
-    salesCount, rentalsCount, lostLeads, leadsByStage, dealers,
+    salesCount, rentalsCount, lostLeads, lostDeals, leadsByStage, dealers, payouts,
+    salesVsRentals, sourceConversion, funnelSteps, overdueAging, inventoryAging, visitStats,
   ] = await Promise.all([
     salesRevenue(companyId, since),
     salesRevenue(companyId),
@@ -44,12 +80,39 @@ export default async function ReportsPage() {
     inventorySnapshot(companyId),
     prisma.deal.count({ where: { companyId, type: "SALE", status: "CLOSED_WON", closeDate: { gte: since } } }),
     prisma.deal.count({ where: { companyId, type: "RENTAL", status: "CLOSED_WON", closeDate: { gte: since } } }),
-    prisma.lead.findMany({ where: { companyId, stage: "CLOSED_LOST" }, select: { lostReason: true }, take: 200 }),
+    // Enriched lost-lead pull: bring source + agent so we can slice the
+    // analytics three ways below.
+    prisma.lead.findMany({
+      where: { companyId, stage: "CLOSED_LOST" },
+      select: {
+        lostReason: true,
+        source: true,
+        agent: { select: { name: true } },
+      },
+      take: 500,
+    }),
+    // Lost deals — same shape; agent comes from the MAIN DealAgent.
+    prisma.deal.findMany({
+      where: { companyId, status: "CLOSED_LOST" },
+      select: {
+        lostReason: true,
+        agents: { where: { role: "MAIN" }, include: { agent: { select: { name: true } } } },
+      },
+      take: 500,
+    }),
     prisma.lead.groupBy({ by: ["stage"], where: { companyId }, _count: { _all: true } }),
     prisma.dealer.findMany({
       where: { companyId },
       select: { id: true, name: true, deals: { where: { status: "CLOSED_WON" }, select: { sale: { select: { salePrice: true } }, rental: { select: { monthlyRent: true } } } } },
     }),
+    payoutSummary(companyId),
+    // Phase 7 — date-range scoped where applicable.
+    monthlySalesVsRentals(companyId, range),
+    leadSourceConversion(companyId, range),
+    funnelDropoff(companyId, range),
+    paymentOverdueAging(companyId),
+    propertyInventoryAging(companyId),
+    visitVerificationStats(companyId, range),
   ]);
 
   // Area performance from closed deals.
@@ -74,13 +137,37 @@ export default async function ReportsPage() {
   const wonLeads = leadsByStage.find((g) => g.stage === "CLOSED_WON")?._count._all ?? 0;
   const conversion = totalLeads ? Math.round((wonLeads / totalLeads) * 100) : 0;
 
-  // Tally lost-lead reasons.
+  // Tally lost-lead reasons three ways: by reason, by agent, by source. The
+  // same loop also feeds the lost-deals analytics — deals are smaller in
+  // volume but more financially meaningful, so they get their own column.
   const reasonMap = new Map<string, number>();
+  const agentLostMap = new Map<string, number>();
+  const sourceLostMap = new Map<string, number>();
   for (const l of lostLeads) {
     const r = l.lostReason?.trim() || "No reason given";
     reasonMap.set(r, (reasonMap.get(r) ?? 0) + 1);
+
+    const a = l.agent?.name ?? "Unassigned";
+    agentLostMap.set(a, (agentLostMap.get(a) ?? 0) + 1);
+
+    const s = humanize(l.source);
+    sourceLostMap.set(s, (sourceLostMap.get(s) ?? 0) + 1);
   }
   const reasons = [...reasonMap.entries()].sort((a, b) => b[1] - a[1]);
+  const agentLosses = [...agentLostMap.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8);
+  const sourceLosses = [...sourceLostMap.entries()].sort((a, b) => b[1] - a[1]);
+
+  // Lost-deal reasons — separate map so we can render them side-by-side.
+  const dealReasonMap = new Map<string, number>();
+  const dealAgentLostMap = new Map<string, number>();
+  for (const d of lostDeals) {
+    const r = d.lostReason?.trim() || "No reason given";
+    dealReasonMap.set(r, (dealReasonMap.get(r) ?? 0) + 1);
+    const a = d.agents[0]?.agent?.name ?? "Unattributed";
+    dealAgentLostMap.set(a, (dealAgentLostMap.get(a) ?? 0) + 1);
+  }
+  const dealReasons = [...dealReasonMap.entries()].sort((a, b) => b[1] - a[1]);
+  const dealAgentLosses = [...dealAgentLostMap.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8);
 
   // Revenue trend — closed-deal value over the last 6 months.
   const sixAgo = new Date();
@@ -113,6 +200,7 @@ export default async function ReportsPage() {
     { type: "agents", label: "Agents" },
     { type: "deals", label: "Deals" },
     { type: "payments", label: "Payments" },
+    { type: "invoices", label: "Invoices" },
     { type: "leads", label: "Leads" },
     { type: "commissions", label: "Commissions" },
   ];
@@ -122,7 +210,7 @@ export default async function ReportsPage() {
       <PageHeader
         eyebrow="Analytics"
         title="Reports"
-        subtitle="The day-to-day data turned into decisions — this month and all-time."
+        subtitle={`Window: ${fmtIsoDate(range.from)} → ${fmtIsoDate(range.to)}. Some widgets (leaderboard, commission totals) are all-time and aren't gated by this range.`}
         action={
           <details className="relative">
             <summary className="btn-ghost cursor-pointer list-none">↧ Export CSV</summary>
@@ -137,12 +225,57 @@ export default async function ReportsPage() {
         }
       />
 
+      <DateRangeFilter defaultFrom={fmtIsoDate(range.from)} defaultTo={fmtIsoDate(range.to)} />
+
+      {showAi && (
+        <Section title="AI · weekly insight">
+          <OwnerInsightPanel />
+        </Section>
+      )}
+
+      {/* Phase 7: Revenue panel — sales/rentals split + month total. */}
+      <div className="grid gap-6 lg:grid-cols-3">
+        <Section title="Sales vs rentals · in window" className="lg:col-span-2">
+          <SalesVsRentalsChart data={salesVsRentals.points} />
+          <p className="mt-2 text-xs text-muted">
+            Stacked area: sales (indigo) + rentals (green). Each rental month uses the monthly rent, not annualised.
+            {salesVsRentals.clamped && (
+              <span className="ms-1 text-warn">
+                Long window — showing the last 24 months only.
+              </span>
+            )}
+          </p>
+        </Section>
+        <Section title="Revenue this month">
+          <p className="text-3xl font-semibold tracking-tight text-ink">{compactMoney(revMonth)}</p>
+          <p className="mt-1 text-xs text-muted">{salesCount} sales · {rentalsCount} rentals closed</p>
+          <p className="mt-3 text-xs text-muted">All-time: <span className="font-medium text-ink">{money(revAll)}</span></p>
+        </Section>
+      </div>
+
       <div className="grid gap-6 lg:grid-cols-2">
-        <Section title="Revenue trend · last 6 months">
+        <Section title="Revenue trend · last 6 months (all-time view)">
           <RevenueTrend data={revenueTrend} />
         </Section>
-        <Section title="Lead funnel">
+        <Section title="Lead funnel (current state)">
           <LeadFunnel data={funnel} />
+        </Section>
+      </div>
+
+      {/* Phase 7: Pipeline panel — source conversion + retention drop-off. */}
+      <div className="grid gap-6 lg:grid-cols-2">
+        <Section title="Lead source conversion · in window">
+          {sourceConversion.length === 0 ? (
+            <p className="text-sm text-muted">No leads created in this window.</p>
+          ) : (
+            <SourceConversionChart data={sourceConversion} />
+          )}
+        </Section>
+        <Section title="Funnel · stage-to-stage retention">
+          <FunnelDropoffChart data={funnelSteps} />
+          <p className="mt-3 text-xs text-muted">
+            Each row shows the % of leads that made it from the previous stage. Bars are cumulative — a lead at NEGOTIATION counts for every prior stage.
+          </p>
         </Section>
       </div>
 
@@ -190,6 +323,42 @@ export default async function ReportsPage() {
           <div className="flex justify-between py-2 text-sm"><span className="text-muted">Pending</span><span className="font-medium text-warn">{money(comm.pending)}</span></div>
         </Section>
 
+        <Section title="Commission payouts · approved + paid">
+          {payouts.byRecipient.length === 0 ? (
+            <p className="text-sm text-muted">No approved commissions yet.</p>
+          ) : (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                {Object.entries(payouts.byParty).map(([p, t]) => (
+                  <div key={p} className="rounded-lg border border-line bg-line-soft/50 px-3 py-2">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-muted">{humanize(p)}</p>
+                    <p className="font-medium text-ink">{compactMoney(t.paid + t.pending)}</p>
+                    <p className="text-[11px] text-muted">
+                      <span className="text-ok">{compactMoney(t.paid)} paid</span>
+                      {" · "}
+                      <span className="text-warn">{compactMoney(t.pending)} pending</span>
+                    </p>
+                  </div>
+                ))}
+              </div>
+              <ul className="divide-y divide-line">
+                {payouts.byRecipient.slice(0, 10).map((r) => (
+                  <li key={r.id} className="flex items-center justify-between py-2 text-sm">
+                    <div>
+                      <p className="font-medium text-ink">{r.name}</p>
+                      <p className="text-[11px] text-muted">{humanize(r.party)}</p>
+                    </div>
+                    <div className="text-right text-xs">
+                      <p className="text-ok">{compactMoney(r.paid)} paid</p>
+                      <p className="text-warn">{compactMoney(r.pending)} pending</p>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </Section>
+
         <Section title="Lost-lead reasons">
           {reasons.length === 0 ? <p className="text-sm text-muted">No lost leads recorded.</p> : (
             <ul className="space-y-2">
@@ -202,7 +371,117 @@ export default async function ReportsPage() {
             </ul>
           )}
         </Section>
+
+        {/* Phase 4: lost-source + lost-by-agent slices for coaching + source-mix decisions */}
+        <Section title="Lost leads by source">
+          {sourceLosses.length === 0 ? (
+            <p className="text-sm text-muted">No data yet.</p>
+          ) : (
+            <ul className="space-y-2">
+              {sourceLosses.map(([s, c]) => (
+                <li key={s} className="flex items-center justify-between text-sm">
+                  <span className="text-slate">{s}</span>
+                  <span className="font-bold text-ink">{c}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Section>
+
+        <Section title="Lost leads by agent">
+          {agentLosses.length === 0 ? (
+            <p className="text-sm text-muted">No data yet.</p>
+          ) : (
+            <ul className="space-y-2">
+              {agentLosses.map(([a, c]) => (
+                <li key={a} className="flex items-center justify-between text-sm">
+                  <span className="text-slate">{a}</span>
+                  <span className="font-bold text-ink">{c}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Section>
+
+        <Section title="Lost deals · by reason">
+          {dealReasons.length === 0 ? (
+            <p className="text-sm text-muted">No lost deals recorded.</p>
+          ) : (
+            <ul className="space-y-2">
+              {dealReasons.map(([r, c]) => (
+                <li key={r} className="flex items-center justify-between text-sm">
+                  <span className="text-slate">{r}</span>
+                  <span className="font-bold text-ink">{c}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Section>
+
+        <Section title="Lost deals · by agent">
+          {dealAgentLosses.length === 0 ? (
+            <p className="text-sm text-muted">No data yet.</p>
+          ) : (
+            <ul className="space-y-2">
+              {dealAgentLosses.map(([a, c]) => (
+                <li key={a} className="flex items-center justify-between text-sm">
+                  <span className="text-slate">{a}</span>
+                  <span className="font-bold text-ink">{c}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Section>
       </div>
+
+      {/* Phase 7: Operations panel — visit verification + inventory aging. */}
+      <div className="grid gap-6 lg:grid-cols-3">
+        <Section title="Visit verification · in window" className="lg:col-span-1">
+          {visitStats.total === 0 ? (
+            <p className="text-sm text-muted">No showings recorded in this window.</p>
+          ) : (
+            <>
+              <div className="flex items-baseline gap-3">
+                <p className="text-4xl font-semibold tracking-tight text-ink">{visitStats.verificationRate}%</p>
+                <p className="text-xs text-muted">{visitStats.verified} of {visitStats.total} verified</p>
+              </div>
+              <dl className="mt-4 space-y-1 text-sm">
+                <div className="flex justify-between"><dt className="text-muted">Pending</dt><dd className="font-medium text-warn">{visitStats.pending}</dd></div>
+                <div className="flex justify-between"><dt className="text-muted">Flagged</dt><dd className="font-medium text-warn">{visitStats.flagged}</dd></div>
+                <div className="flex justify-between"><dt className="text-muted">Rejected</dt><dd className="font-medium text-danger">{visitStats.rejected}</dd></div>
+              </dl>
+            </>
+          )}
+        </Section>
+
+        <Section title="Property inventory aging" className="lg:col-span-2">
+          {inventoryAging.every((b) => b.count === 0) ? (
+            <p className="text-sm text-muted">No active inventory.</p>
+          ) : (
+            <>
+              <InventoryAgingChart data={inventoryAging} />
+              <p className="mt-3 text-xs text-muted">
+                Days since listing for properties still on the market (AVAILABLE / RESERVED / UNDER_NEGOTIATION / PENDING_VERIFICATION).
+                Anything in the 180+ bucket likely needs a price drop or fresh photos.
+              </p>
+            </>
+          )}
+        </Section>
+      </div>
+
+      {/* Phase 7: Finance panel — overdue aging buckets. */}
+      <Section title="Overdue payments · aging">
+        {overdueAging.every((b) => b.count === 0) ? (
+          <p className="text-sm text-muted">No overdue payments — nice.</p>
+        ) : (
+          <>
+            <OverdueAgingChart data={overdueAging} />
+            <p className="mt-3 text-xs text-muted">
+              Standard accounting buckets (current → 30 → 60 → 90+). Hover a bar for the total amount in that band.
+            </p>
+          </>
+        )}
+      </Section>
     </div>
   );
 }

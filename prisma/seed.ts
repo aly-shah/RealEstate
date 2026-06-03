@@ -39,9 +39,11 @@ const FEEDBACK = ["Loved the layout, considering an offer.", "Concerned about th
 
 interface UserDef { email: string; name: string; phone: string; role: "OWNER" | "ADMIN" | "AGENT" | "DEALER" }
 
+type SeedPlan = "FREE" | "TRIAL" | "STARTER" | "GROWTH" | "PRO";
+
 interface CompanyCfg {
   name: string;
-  plan: string;
+  plan: SeedPlan;
   refPrefix: string;
   seed: number;
   users: UserDef[];
@@ -72,7 +74,7 @@ async function seedCompany(cfg: CompanyCfg, hash: string) {
   // Dealers
   const dealers = [];
   for (let i = 0; i < cfg.counts.dealers; i++) {
-    const name = `${r.pick(["Skyline", "Metro", "Prime", "Elite", "Crown", "Apex", "Horizon", "Summit"])} ${r.pick(["Builders", "Estates", "Marketing", "Property Group", "Associates"])}`;
+    const name = `${r.pick(["Clifton Heights", "UrbanEdge", "Capital Crest", "Bahria", "Gulberg", "Metro", "Crown", "Horizon", "Summit"])} ${r.pick(["Builders", "Estates", "Realty", "Marketing", "Property Group", "Associates"])}`;
     dealers.push(
       await prisma.dealer.create({
         data: {
@@ -269,7 +271,7 @@ async function seedCompany(cfg: CompanyCfg, hash: string) {
         agents: { create: [{ agentId: main, role: "MAIN" }, ...cos.map((c) => ({ agentId: c.id, role: "CO_AGENT" as const }))] },
         ...(type === "SALE"
           ? { sale: { create: { salePrice: D(value), tokenAmount: D(value * 0.02), bookingAmount: D(value * 0.1), downPayment: D(value * 0.3) } } }
-          : { rental: { create: { monthlyRent: D(value), deposit: D(value * 2), rentalCommission: D(value), leaseMonths: 12, renewalDate: daysAhead(r.int(120, 360)) } } }),
+          : { rental: { create: { monthlyRent: D(value), deposit: D(value * 2), leaseMonths: 12, renewalDate: daysAhead(r.int(120, 360)) } } }),
       },
     });
     logs.push({ companyId: company.id, userId: admin.id, action: "deal.created", entityType: "DEAL", entityId: deal.id, summary: `Created ${type.toLowerCase()} deal ${deal.reference}`, createdAt: deal.createdAt });
@@ -366,24 +368,33 @@ async function main() {
 
   const hash = await bcrypt.hash(PASSWORD, 10);
 
-  await prisma.user.create({ data: { email: "super@scalamatic.test", name: "promptzer Support", passwordHash: hash, role: "SUPER_ADMIN" } });
+  // SUPER_ADMIN lives outside any tenant — uses the platform domain.
+  await prisma.user.create({
+    data: {
+      email: "support@proptimizr.com",
+      name: "Proptimizr Support",
+      passwordHash: hash,
+      role: "SUPER_ADMIN",
+    },
+  });
 
   await seedCompany(
     {
-      name: "Skyline Estates",
-      plan: "growth",
-      refPrefix: "SKY",
+      // Primary demo tenant — Pakistan-market realistic.
+      name: "Clifton Heights Realty",
+      plan: "GROWTH",
+      refPrefix: "CHR",
       seed: 20260521,
       users: [
-        { email: "owner@skyline.test", name: "Imran Khanani", phone: "+92 300 1112233", role: "OWNER" },
-        { email: "admin@skyline.test", name: "Sana Riaz", phone: "+92 301 2223344", role: "ADMIN" },
-        { email: "agent@skyline.test", name: "Bilal Ahmed", phone: "+92 302 3334455", role: "AGENT" },
-        { email: "agent2@skyline.test", name: "Hira Sheikh", phone: "+92 303 4445566", role: "AGENT" },
-        { email: "agent3@skyline.test", name: "Ali Raza", phone: "+92 305 5556677", role: "AGENT" },
-        { email: "agent4@skyline.test", name: "Maria Qureshi", phone: "+92 306 6667788", role: "AGENT" },
-        { email: "agent5@skyline.test", name: "Omar Farooq", phone: "+92 307 7778899", role: "AGENT" },
-        { email: "agent6@skyline.test", name: "Nida Baig", phone: "+92 308 8889900", role: "AGENT" },
-        { email: "dealer@skyline.test", name: "Faisal Property Group", phone: "+92 304 5556677", role: "DEALER" },
+        { email: "owner@proptimizr.test", name: "Imran Khanani", phone: "+92 300 1112233", role: "OWNER" },
+        { email: "admin@proptimizr.test", name: "Sana Riaz", phone: "+92 301 2223344", role: "ADMIN" },
+        { email: "agent@proptimizr.test", name: "Bilal Ahmed", phone: "+92 302 3334455", role: "AGENT" },
+        { email: "agent2@proptimizr.test", name: "Hira Sheikh", phone: "+92 303 4445566", role: "AGENT" },
+        { email: "agent3@proptimizr.test", name: "Ali Raza", phone: "+92 305 5556677", role: "AGENT" },
+        { email: "agent4@proptimizr.test", name: "Maria Qureshi", phone: "+92 306 6667788", role: "AGENT" },
+        { email: "agent5@proptimizr.test", name: "Omar Farooq", phone: "+92 307 7778899", role: "AGENT" },
+        { email: "agent6@proptimizr.test", name: "Nida Baig", phone: "+92 308 8889900", role: "AGENT" },
+        { email: "dealer@proptimizr.test", name: "Faisal Property Group", phone: "+92 304 5556677", role: "DEALER" },
       ],
       counts: { dealers: 6, projects: 3, properties: 64, clients: 48, leads: 80, showings: 50, events: 64, deals: 36, documents: 38 },
     },
@@ -392,16 +403,16 @@ async function main() {
 
   await seedCompany(
     {
-      name: "Metro Realty",
-      plan: "standard",
-      refPrefix: "MET",
+      name: "UrbanEdge Properties",
+      plan: "STARTER",
+      refPrefix: "UEP",
       seed: 77777,
       users: [
-        { email: "owner@metro.test", name: "Tariq Mehmood", phone: "+92 311 1234567", role: "OWNER" },
-        { email: "admin@metro.test", name: "Komal Javed", phone: "+92 312 2345678", role: "ADMIN" },
-        { email: "agent@metro.test", name: "Saad Mirza", phone: "+92 313 3456789", role: "AGENT" },
-        { email: "agent2@metro.test", name: "Iqra Shah", phone: "+92 314 4567890", role: "AGENT" },
-        { email: "dealer@metro.test", name: "Crown Builders", phone: "+92 315 5678901", role: "DEALER" },
+        { email: "owner@urbanedge.test", name: "Tariq Mehmood", phone: "+92 311 1234567", role: "OWNER" },
+        { email: "admin@urbanedge.test", name: "Komal Javed", phone: "+92 312 2345678", role: "ADMIN" },
+        { email: "agent@urbanedge.test", name: "Saad Mirza", phone: "+92 313 3456789", role: "AGENT" },
+        { email: "agent2@urbanedge.test", name: "Iqra Shah", phone: "+92 314 4567890", role: "AGENT" },
+        { email: "dealer@urbanedge.test", name: "Crown Builders", phone: "+92 315 5678901", role: "DEALER" },
       ],
       counts: { dealers: 3, projects: 2, properties: 22, clients: 18, leads: 28, showings: 16, events: 20, deals: 12, documents: 12 },
     },
@@ -412,7 +423,9 @@ async function main() {
     prisma.company.count(), prisma.property.count(), prisma.lead.count(), prisma.deal.count(), prisma.payment.count(),
   ]);
   console.log(`Done · ${companies} companies, ${props} properties, ${leads} leads, ${deals} deals, ${payments} payments.`);
-  console.log("Login (password: 'password'): owner@skyline.test · admin@skyline.test · agent@skyline.test · dealer@skyline.test · super@scalamatic.test");
+  console.log(
+    "Login (password: 'password'): owner@proptimizr.test · admin@proptimizr.test · agent@proptimizr.test · dealer@proptimizr.test · support@proptimizr.com",
+  );
 }
 
 main()

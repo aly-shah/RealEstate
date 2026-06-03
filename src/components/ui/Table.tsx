@@ -23,6 +23,6 @@ export function Table({ head, children }: TableProps) {
   );
 }
 
-export function Td({ children, className = "" }: { children: React.ReactNode; className?: string }) {
-  return <td className={`px-4 py-3 align-middle ${className}`}>{children}</td>;
+export function Td({ children, className = "", title }: { children: React.ReactNode; className?: string; title?: string }) {
+  return <td className={`px-4 py-3 align-middle ${className}`} title={title}>{children}</td>;
 }

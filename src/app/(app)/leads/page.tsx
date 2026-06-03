@@ -4,22 +4,31 @@ import { prisma } from "@/lib/prisma";
 import { requireCompanyUser } from "@/lib/session";
 import { leadScope } from "@/lib/scope";
 import { compactMoney, humanize, fmtDate } from "@/lib/format";
+import { can } from "@/lib/rbac";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Table, Td } from "@/components/ui/Table";
 import { StatusBadge } from "@/components/ui/Badge";
 import { FilterBar } from "@/components/ui/FilterBar";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { Pagination } from "@/components/ui/Pagination";
+import { parsePage } from "@/lib/pagination";
+import { SavedViews } from "@/components/ui/SavedViews";
+import { scoreLead } from "@/lib/lead-score";
+import { leadHealth } from "@/lib/lead-health";
+import { LeadHealthBadge } from "@/components/lead/LeadHealthBadge";
+import { LeadScoreBadge } from "@/components/lead/LeadScoreBadge";
 
 const STAGES = ["NEW", "CONTACTED", "INTERESTED", "SITE_VISIT", "PROPERTY_SHOWN", "NEGOTIATION", "TOKEN_BOOKING", "PAYMENT", "CLOSED_WON", "CLOSED_LOST"] as const;
 
 export default async function LeadsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; stage?: string }>;
+  searchParams: Promise<{ q?: string; stage?: string; page?: string; pageSize?: string }>;
 }) {
   const user = await requireCompanyUser();
   const sp = await searchParams;
   const scope = leadScope(user);
+  const { page, pageSize, skip } = parsePage(sp);
 
   const where: Prisma.LeadWhereInput = {
     ...scope,
@@ -27,15 +36,60 @@ export default async function LeadsPage({
     ...(sp.q ? { client: { name: { contains: sp.q, mode: "insensitive" } } } : {}),
   };
 
-  const [leads, grouped] = await Promise.all([
+  const [leads, total, grouped] = await Promise.all([
     prisma.lead.findMany({
       where,
-      include: { client: true, agent: true, property: true },
+      include: {
+        client: true,
+        agent: true,
+        property: true,
+        // Pull just what scoring + health need; the showings select stays cheap
+        // (PK only) and the count is one extra index hit per lead.
+        showings: { select: { interestLevel: true } },
+        _count: {
+          select: {
+            events: { where: { startAt: { gt: new Date() }, status: "SCHEDULED" } },
+          },
+        },
+      },
       orderBy: { updatedAt: "desc" },
-      take: 100,
+      skip,
+      take: pageSize,
     }),
+    prisma.lead.count({ where }),
     prisma.lead.groupBy({ by: ["stage"], where: scope, _count: { _all: true } }),
   ]);
+
+  // Lift the highest non-null interest level seen across showings. HIGH wins
+  // over MEDIUM wins over LOW wins over NONE.
+  const interestRank: Record<string, number> = { HIGH: 4, MEDIUM: 3, LOW: 2, NONE: 1 };
+  const decorated = leads.map((l) => {
+    const topInterest = l.showings.reduce<null | "HIGH" | "MEDIUM" | "LOW" | "NONE">(
+      (best, s) =>
+        s.interestLevel && (best == null || interestRank[s.interestLevel] > interestRank[best])
+          ? (s.interestLevel as "HIGH" | "MEDIUM" | "LOW" | "NONE")
+          : best,
+      null,
+    );
+    const score = scoreLead({
+      stage: l.stage,
+      source: l.source,
+      hasBudget: !!(l.budgetMin || l.budgetMax),
+      hasProperty: !!l.propertyId,
+      updatedAt: l.updatedAt,
+      hasShowing: l.showings.length > 0,
+      topInterest,
+      override: l.scoreOverride,
+    });
+    const health = leadHealth({
+      stage: l.stage,
+      lastContactedAt: l.lastContactedAt,
+      createdAt: l.createdAt,
+      unassigned: !l.agentId,
+      hasFutureEvent: l._count.events > 0,
+    });
+    return { l, score, health };
+  });
 
   const counts = Object.fromEntries(grouped.map((g) => [g.stage, g._count._all]));
 
@@ -45,7 +99,14 @@ export default async function LeadsPage({
         eyebrow="CRM"
         title="Leads"
         subtitle="Move every enquiry through the pipeline — nothing falls through the cracks."
-        action={<Link href="/leads/new" className="btn-accent">+ New lead</Link>}
+        action={
+          <div className="flex items-center gap-2">
+            {can(user.role, "assignLeadsCalendars") && (
+              <Link href="/leads/import" className="btn-ghost">↥ Import</Link>
+            )}
+            <Link href="/leads/new" className="btn-accent">+ New lead</Link>
+          </div>
+        }
       />
 
       {/* Pipeline summary */}
@@ -68,27 +129,42 @@ export default async function LeadsPage({
         ))}
       </div>
 
-      <FilterBar searchPlaceholder="Search client…" filters={[{ key: "stage", label: "Stage", options: STAGES }]} />
+      {/* FilterBar already has bottom margin; the SavedViews chip sits inline-right. */}
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="flex-1 min-w-0">
+          <FilterBar searchPlaceholder="Search client…" filters={[{ key: "stage", label: "Stage", options: STAGES }]} />
+        </div>
+        <div className="mb-4 self-center"><SavedViews /></div>
+      </div>
 
-      {leads.length === 0 ? (
+      {decorated.length === 0 ? (
         <EmptyState title="No leads found" hint="Capture an enquiry to start the pipeline." />
       ) : (
-        <Table head={["Client", "Stage", "Source", "Property", "Budget", "Agent", "Updated"]}>
-          {leads.map((l) => (
-            <tr key={l.id} className="hover:bg-line-soft">
-              <Td>
-                <Link href={`/leads/${l.id}`} className="font-medium text-ink hover:text-accent">{l.client?.name ?? "Unnamed"}</Link>
-                <div className="text-xs text-muted">{l.client?.phone ?? ""}</div>
-              </Td>
-              <Td><StatusBadge status={l.stage} /></Td>
-              <Td>{humanize(l.source)}</Td>
-              <Td className="max-w-[180px] truncate text-xs">{l.property?.title ?? l.prefArea ?? "—"}</Td>
-              <Td className="whitespace-nowrap text-xs">{l.budgetMax ? `≤ ${compactMoney(l.budgetMax)}` : "—"}</Td>
-              <Td className="text-xs">{l.agent?.name ?? <span className="text-warn">Unassigned</span>}</Td>
-              <Td className="text-xs text-muted">{fmtDate(l.updatedAt)}</Td>
-            </tr>
-          ))}
-        </Table>
+        <>
+          <Table head={["Client", "Stage", "Score", "Health", "Source", "Property", "Budget", "Agent", "Updated"]}>
+            {decorated.map(({ l, score, health }) => (
+              <tr key={l.id} className="hover:bg-line-soft">
+                <Td>
+                  <Link href={`/leads/${l.id}`} className="font-medium text-ink hover:text-accent">{l.client?.name ?? "Unnamed"}</Link>
+                  <div className="text-xs text-muted">{l.client?.phone ?? ""}</div>
+                </Td>
+                <Td><StatusBadge status={l.stage} /></Td>
+                <Td>
+                  <LeadScoreBadge band={score.band} score={score.score} overridden={score.overridden} reasons={score.reasons} />
+                </Td>
+                <Td>
+                  <LeadHealthBadge health={health.health} reasons={health.reasons} />
+                </Td>
+                <Td>{humanize(l.source)}</Td>
+                <Td className="max-w-[180px] truncate text-xs">{l.property?.title ?? l.prefArea ?? "—"}</Td>
+                <Td className="whitespace-nowrap text-xs">{l.budgetMax ? `≤ ${compactMoney(l.budgetMax)}` : "—"}</Td>
+                <Td className="text-xs">{l.agent?.name ?? <span className="text-warn">Unassigned</span>}</Td>
+                <Td className="text-xs text-muted">{fmtDate(l.updatedAt)}</Td>
+              </tr>
+            ))}
+          </Table>
+          <Pagination total={total} page={page} pageSize={pageSize} />
+        </>
       )}
     </div>
   );

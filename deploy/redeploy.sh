@@ -1,15 +1,18 @@
 #!/usr/bin/env bash
 #
-# promptzer CRM — redeploy on the VPS. Pulls latest main, installs deps,
+# Proptimizr CRM — redeploy on the VPS. Pulls latest main, installs deps,
 # pushes schema changes, builds, and reloads the PM2 process. Idempotent.
 #
 # Usually invoked by .github/workflows/deploy.yml over SSH, but you can also
 # run it by hand:  sudo APP_DIR=/var/www/RealEstate bash deploy/redeploy.sh
 #
+# On a deployment that pre-dates the brand rename, set APP_NAME explicitly:
+#   sudo APP_NAME=promptzer-crm bash deploy/redeploy.sh
+#
 set -euo pipefail
 
 APP_DIR="${APP_DIR:-/var/www/RealEstate}"
-APP_NAME="${APP_NAME:-promptzer-crm}"
+APP_NAME="${APP_NAME:-proptimizr-crm}"
 BRANCH="${BRANCH:-main}"
 
 log() { printf "\n\033[1;36m▸ %s\033[0m\n" "$*"; }

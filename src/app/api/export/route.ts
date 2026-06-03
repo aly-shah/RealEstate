@@ -96,6 +96,38 @@ export async function GET(req: NextRequest) {
         ),
       );
     }
+    case "invoices": {
+      const invoices = await prisma.invoice.findMany({
+        where: { companyId },
+        include: {
+          client: true,
+          deal: { include: { client: true } },
+          payments: { where: { status: "PAID" }, select: { amount: true } },
+        },
+        orderBy: { issuedAt: "desc" },
+      });
+      return csvResponse(
+        "invoices.csv",
+        toCsv(
+          ["Number", "Issued", "Due", "Status", "Client", "Deal", "Amount", "Paid", "Balance"],
+          invoices.map((inv) => {
+            const paid = inv.payments.reduce((s, p) => s + toNumber(p.amount), 0);
+            const amount = toNumber(inv.amount);
+            return [
+              inv.number,
+              inv.issuedAt.toISOString().slice(0, 10),
+              inv.dueDate ? inv.dueDate.toISOString().slice(0, 10) : "",
+              inv.status,
+              inv.client?.name ?? inv.deal?.client?.name ?? "",
+              inv.deal?.reference ?? "",
+              amount,
+              paid,
+              Math.max(0, amount - paid),
+            ];
+          }),
+        ),
+      );
+    }
     default:
       return new Response("Unknown export type", { status: 400 });
   }

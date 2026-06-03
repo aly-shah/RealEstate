@@ -4,6 +4,7 @@ import { useActionState } from "react";
 import Link from "next/link";
 import { createProperty, type FormState } from "../actions";
 import { humanize } from "@/lib/format";
+import { CityAreaPicker } from "@/components/ui/CityAreaPicker";
 
 const TYPES = ["APARTMENT", "VILLA", "RESIDENTIAL", "COMMERCIAL", "PLOT", "SHOP", "OFFICE"];
 const LISTING = ["SALE", "RENT", "BOTH"];
@@ -68,13 +69,14 @@ export function PropertyForm({ dealers, canPickDealer }: PropertyFormProps) {
 
       <div className="surface p-6">
         <h2 className="mb-4 text-sm font-bold uppercase tracking-wide text-ink">Location &amp; pricing</h2>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div><label className="label" htmlFor="city">City</label><input id="city" name="city" className="field" /></div>
-          <div><label className="label" htmlFor="area">Area / locality</label><input id="area" name="area" className="field" /></div>
-          <div className="sm:col-span-2"><label className="label" htmlFor="address">Address</label><input id="address" name="address" className="field" /></div>
-          <div><label className="label" htmlFor="salePrice">Sale price (PKR)</label><input id="salePrice" name="salePrice" type="number" min="0" className="field" /></div>
-          <div><label className="label" htmlFor="monthlyRent">Monthly rent (PKR)</label><input id="monthlyRent" name="monthlyRent" type="number" min="0" className="field" /></div>
-          <div><label className="label" htmlFor="deposit">Security deposit (PKR)</label><input id="deposit" name="deposit" type="number" min="0" className="field" /></div>
+        <div className="space-y-4">
+          <CityAreaPicker cityName="city" areaName="area" />
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="sm:col-span-2"><label className="label" htmlFor="address">Address</label><input id="address" name="address" className="field" /></div>
+            <div><label className="label" htmlFor="salePrice">Sale price (PKR)</label><input id="salePrice" name="salePrice" type="number" min="0" className="field" /></div>
+            <div><label className="label" htmlFor="monthlyRent">Monthly rent (PKR)</label><input id="monthlyRent" name="monthlyRent" type="number" min="0" className="field" /></div>
+            <div><label className="label" htmlFor="deposit">Security deposit (PKR)</label><input id="deposit" name="deposit" type="number" min="0" className="field" /></div>
+          </div>
         </div>
       </div>
 

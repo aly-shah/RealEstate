@@ -9,7 +9,9 @@ import { requireCompanyUser } from "@/lib/session";
 import { can } from "@/lib/rbac";
 import { logActivity, notify } from "@/lib/activity";
 import { computeCommission } from "@/lib/commission";
-import { toNumber } from "@/lib/format";
+import { toNumber, humanize } from "@/lib/format";
+import { setFlash } from "@/lib/flash";
+import { nextDealReference } from "@/lib/refs";
 
 const dealSchema = z.object({
   propertyId: z.string().min(1, "Property is required"),
@@ -27,10 +29,10 @@ export type FormState = { error?: string; fieldErrors?: Record<string, string[]>
 
 const dec = (v?: number) => (v === undefined || Number.isNaN(v) ? null : new Prisma.Decimal(v));
 
-async function nextDealRef(companyId: string): Promise<string> {
-  const count = await prisma.deal.count({ where: { companyId } });
-  return `DEAL-${String(count + 1).padStart(4, "0")}`;
-}
+// nextDealRef removed — superseded by lib/refs.ts:nextDealReference, which
+// uses Company.refPrefix so each tenant gets distinguishable references
+// (`CHR-D-0001` vs `UEP-D-0001`) instead of every tenant starting at DEAL-0001.
+// Platform fallback prefix is `PROP` for tenants with no name set.
 
 export async function createDeal(_prev: FormState, formData: FormData): Promise<FormState> {
   const user = await requireCompanyUser();
@@ -51,29 +53,42 @@ export async function createDeal(_prev: FormState, formData: FormData): Promise<
       .map((id) => ({ agent: { connect: { id } }, role: "CO_AGENT" as const })),
   ];
 
-  const deal = await prisma.deal.create({
-    data: {
-      companyId: user.companyId,
-      reference: await nextDealRef(user.companyId),
-      type: d.type,
-      status: "DRAFT",
-      propertyId: d.propertyId,
-      clientId: d.clientId || null,
-      dealerId: d.dealerId || null,
-      agents: { create: agentLinks },
-      ...(d.type === "SALE"
-        ? { sale: { create: { salePrice: new Prisma.Decimal(d.amount) } } }
-        : {
-            rental: {
-              create: {
-                monthlyRent: new Prisma.Decimal(d.amount),
-                deposit: dec(d.deposit),
-                leaseMonths: d.leaseMonths ?? null,
-              },
+  const dataBase = {
+    companyId: user.companyId,
+    type: d.type,
+    status: "DRAFT" as const,
+    propertyId: d.propertyId,
+    clientId: d.clientId || null,
+    dealerId: d.dealerId || null,
+    agents: { create: agentLinks },
+    ...(d.type === "SALE"
+      ? { sale: { create: { salePrice: new Prisma.Decimal(d.amount) } } }
+      : {
+          rental: {
+            create: {
+              monthlyRent: new Prisma.Decimal(d.amount),
+              deposit: dec(d.deposit),
+              leaseMonths: d.leaseMonths ?? null,
             },
-          }),
-    },
-  });
+          },
+        }),
+  };
+
+  // Same retry-on-P2002 pattern as createProperty + createInvoice — handles
+  // the narrow race between MAX-lookup and INSERT under concurrent traffic.
+  let deal: Awaited<ReturnType<typeof prisma.deal.create>> | null = null;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      deal = await prisma.deal.create({
+        data: { ...dataBase, reference: await nextDealReference(user.companyId) },
+      });
+      break;
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") continue;
+      throw e;
+    }
+  }
+  if (!deal) return { error: "Could not allocate a deal reference. Try again." };
 
   await logActivity({
     companyId: user.companyId,
@@ -94,13 +109,24 @@ export async function setDealStatus(formData: FormData): Promise<void> {
 
   const id = String(formData.get("id"));
   const status = String(formData.get("status")) as Prisma.DealUpdateInput["status"];
+  const lostReason = (formData.get("lostReason") ? String(formData.get("lostReason")) : "").trim();
 
   const deal = await prisma.deal.findFirst({ where: { id, companyId: user.companyId }, include: { property: true } });
   if (!deal) return;
 
+  // Hard-require a reason on CLOSED_LOST. HTML5 `required` on the input is
+  // the primary UX; this is the server-side backstop.
+  if (status === "CLOSED_LOST" && !lostReason) return;
+
+  const isClosed = status === "CLOSED_WON" || status === "CLOSED_LOST";
   await prisma.deal.update({
     where: { id },
-    data: { status, closeDate: status === "CLOSED_WON" ? new Date() : deal.closeDate },
+    data: {
+      status,
+      closeDate: status === "CLOSED_WON" ? new Date() : deal.closeDate,
+      // Capture the reason on LOST; clear it if the deal is reopened later.
+      lostReason: status === "CLOSED_LOST" ? lostReason : isClosed ? deal.lostReason : null,
+    },
   });
 
   // Reflect closure on the property.
@@ -114,10 +140,25 @@ export async function setDealStatus(formData: FormData): Promise<void> {
   await logActivity({
     companyId: user.companyId,
     userId: user.id,
-    action: "deal.status",
+    action: status === "CLOSED_LOST" ? "deal.lost" : "deal.status",
     entityType: "DEAL",
     entityId: id,
-    summary: `Deal ${deal.reference} → ${String(status)}`,
+    summary: status === "CLOSED_LOST"
+      ? `Deal ${deal.reference} lost — ${lostReason}`
+      : `Deal ${deal.reference} → ${String(status)}`,
+    meta: {
+      from: deal.status,
+      to: String(status),
+      ...(status === "CLOSED_LOST" ? { lostReason } : {}),
+    },
+  });
+  await setFlash({
+    tone: status === "CLOSED_LOST" ? "warn" : status === "CLOSED_WON" ? "ok" : "info",
+    message: status === "CLOSED_LOST"
+      ? `${deal.reference} marked lost.`
+      : status === "CLOSED_WON"
+        ? `${deal.reference} closed — property auto-marked ${deal.type === "SALE" ? "SOLD" : "RENTED"}.`
+        : `${deal.reference}: ${humanize(String(status))}.`,
   });
   revalidatePath(`/deals/${id}`);
   revalidatePath("/deals");

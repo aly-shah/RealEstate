@@ -13,14 +13,20 @@ interface DemoAccount {
 }
 
 const DEMO_ACCOUNTS: DemoAccount[] = [
-  { role: "Owner",       email: "owner@skyline.test",    hintKey: "owner"  },
-  { role: "Admin",       email: "admin@skyline.test",    hintKey: "admin"  },
-  { role: "Agent",       email: "agent@skyline.test",    hintKey: "agent"  },
-  { role: "Dealer",      email: "dealer@skyline.test",   hintKey: "dealer" },
-  { role: "Super Admin", email: "super@scalamatic.test", hintKey: "super"  },
+  { role: "Owner",       email: "owner@proptimizr.test",  hintKey: "owner"  },
+  { role: "Admin",       email: "admin@proptimizr.test",  hintKey: "admin"  },
+  { role: "Agent",       email: "agent@proptimizr.test",  hintKey: "agent"  },
+  { role: "Dealer",      email: "dealer@proptimizr.test", hintKey: "dealer" },
+  { role: "Super Admin", email: "support@proptimizr.com", hintKey: "super"  },
 ];
 
-export function LoginForm({ dict }: { dict: Dict }) {
+interface LoginFormProps {
+  dict: Dict;
+  /** Optional banner shown above the form (e.g. "your account was suspended"). */
+  notice?: string | null;
+}
+
+export function LoginForm({ dict, notice }: LoginFormProps) {
   const [state, action, pending] = useActionState<LoginState, FormData>(loginAction, {});
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -86,7 +92,7 @@ export function LoginForm({ dict }: { dict: Dict }) {
           </div>
 
           <p className="text-xs text-white/55">
-            © {new Date().getFullYear()} promptzer · {dict.login.copyright}
+            © {new Date().getFullYear()} Proptimizr · {dict.login.copyright}
           </p>
         </div>
       </div>
@@ -100,6 +106,12 @@ export function LoginForm({ dict }: { dict: Dict }) {
 
           <h2 className="text-3xl font-semibold tracking-tight text-ink">{dict.login.welcomeBack}</h2>
           <p className="mt-1.5 text-sm text-muted">{dict.login.subtitle}</p>
+
+          {notice && (
+            <p className="mt-5 rounded-xl border border-warn/30 bg-warn-bg px-3 py-2 text-sm text-warn">
+              {notice}
+            </p>
+          )}
 
           <form action={action} className="mt-8 space-y-4">
             <div>

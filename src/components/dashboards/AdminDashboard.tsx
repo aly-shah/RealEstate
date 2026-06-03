@@ -1,13 +1,15 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { outstandingPayments } from "@/lib/metrics";
-import { fmtDateTime, fmtDate, localizeDigits } from "@/lib/format";
+import { fmtDateTime, fmtDate, humanize, localizeDigits } from "@/lib/format";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { StatCard } from "@/components/ui/StatCard";
 import { Section } from "@/components/ui/Section";
 import { StatusBadge } from "@/components/ui/Badge";
 import { Icon } from "@/components/ui/Icon";
 import { getDict } from "@/lib/i18n/server";
+import { leadHealth } from "@/lib/lead-health";
+import { LeadHealthBadge } from "@/components/lead/LeadHealthBadge";
 
 export async function AdminDashboard({ companyId }: { companyId: string }) {
   const startOfDay = new Date();
@@ -15,7 +17,14 @@ export async function AdminDashboard({ companyId }: { companyId: string }) {
   const endOfDay = new Date(startOfDay);
   endOfDay.setDate(endOfDay.getDate() + 1);
 
-  const [{ locale, dict }, todayEvents, unassignedLeads, visitsToVerify, docsToCheck, commsToApprove, pay] =
+  // Stale-lead candidate set: any active lead whose latest touch is older than
+  // 3 days. We compute the precise health tag in JS to honor per-stage
+  // thresholds; this pre-filter keeps the query light. 50 is enough to find
+  // the worst offenders without paginating on the dashboard.
+  const staleCandidateCutoff = new Date();
+  staleCandidateCutoff.setDate(staleCandidateCutoff.getDate() - 3);
+
+  const [{ locale, dict }, todayEvents, unassignedLeads, visitsToVerify, docsToCheck, commsToApprove, pay, staleCandidates] =
     await Promise.all([
       getDict(),
       prisma.calendarEvent.findMany({
@@ -33,7 +42,42 @@ export async function AdminDashboard({ companyId }: { companyId: string }) {
         take: 5,
       }),
       outstandingPayments(companyId),
+      prisma.lead.findMany({
+        where: {
+          companyId,
+          stage: { notIn: ["CLOSED_WON", "CLOSED_LOST"] },
+          updatedAt: { lt: staleCandidateCutoff },
+        },
+        include: {
+          client: { select: { name: true } },
+          agent: { select: { name: true } },
+          _count: {
+            select: {
+              events: { where: { startAt: { gt: new Date() }, status: "SCHEDULED" } },
+            },
+          },
+        },
+        orderBy: { updatedAt: "asc" },
+        take: 50,
+      }),
     ]);
+
+  // Rank-and-truncate the stale list down to STALE/URGENT entries only — the
+  // dashboard widget is for "needs an action today", not the full backlog.
+  const staleLeads = staleCandidates
+    .map((l) => ({
+      lead: l,
+      h: leadHealth({
+        stage: l.stage,
+        lastContactedAt: l.lastContactedAt,
+        createdAt: l.createdAt,
+        unassigned: !l.agentId,
+        hasFutureEvent: l._count.events > 0,
+      }),
+    }))
+    .filter((x) => x.h.health === "STALE" || x.h.health === "URGENT")
+    .sort((a, b) => (a.h.health === "URGENT" ? -1 : 1) - (b.h.health === "URGENT" ? -1 : 1))
+    .slice(0, 6);
 
   return (
     <div className="space-y-6">
@@ -89,6 +133,35 @@ export async function AdminDashboard({ companyId }: { companyId: string }) {
           )}
         </Section>
       </div>
+
+      {/* Phase 4: stale leads — the most fixable backlog the office can clear today. */}
+      {staleLeads.length > 0 && (
+        <Section
+          title="Stale leads · needs attention"
+          action={<Link href="/leads" className="text-xs font-semibold text-accent hover:text-accent-soft">{dict.common.allLeads} →</Link>}
+        >
+          <ul className="divide-y divide-line">
+            {staleLeads.map(({ lead, h }) => (
+              <li key={lead.id} className="flex items-center justify-between gap-2 py-2.5">
+                <div className="min-w-0">
+                  <Link
+                    href={`/leads/${lead.id}`}
+                    className="truncate text-sm font-semibold text-ink hover:text-accent"
+                  >
+                    {lead.client?.name ?? "Unnamed"}
+                  </Link>
+                  <p className="text-xs text-muted">
+                    {humanize(lead.stage)} · {lead.agent?.name ?? "Unassigned"} · last touched{" "}
+                    <span data-keep-latin>{localizeDigits(fmtDate(lead.updatedAt), locale)}</span>
+                  </p>
+                </div>
+                <LeadHealthBadge health={h.health} reasons={h.reasons} />
+              </li>
+            ))}
+          </ul>
+        </Section>
+      )}
     </div>
   );
 }
+

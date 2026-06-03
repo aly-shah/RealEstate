@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# promptzer Real Estate CRM — one-shot VPS deploy (Ubuntu/Debian).
+# Proptimizr Real Estate CRM — one-shot VPS deploy (Ubuntu/Debian).
 # Installs Node + PostgreSQL + PM2 + nginx, clones the repo, builds, seeds,
 # frees the target port, and serves the app at $DOMAIN with HTTPS.
 #
@@ -10,19 +10,28 @@
 #
 # Re-running is safe: it pulls latest, rebuilds, and reuses existing DB/.env.
 #
+# Upgrading an old deployment that used `promptzer-*` paths/process names?
+# Set the legacy values explicitly so the script keeps targeting them:
+#   APP_DIR=/var/www/promptzer-crm \
+#   APP_NAME=promptzer-crm \
+#   DB_NAME=promptzer_crm DB_USER=promptzer \
+#   bash setup.sh
+# Renaming live deployments to the new defaults is a manual operation
+# (rename the directory, pm2 process, and the Postgres DB/role).
+#
 set -euo pipefail
 
 # ─────────────────────────── Config (override via env) ───────────────────────────
 DOMAIN="${DOMAIN:-crm.proptimizr.com}"
 APP_PORT="${APP_PORT:-3000}"               # port the CRM listens on (behind nginx)
-APP_DIR="${APP_DIR:-/var/www/promptzer-crm}"
-APP_NAME="promptzer-crm"                    # pm2 process name
+APP_DIR="${APP_DIR:-/var/www/proptimizr-crm}"
+APP_NAME="${APP_NAME:-proptimizr-crm}"     # pm2 process name
 REPO_URL="${REPO_URL:-https://github.com/aly-shah/RealEstate.git}"
 BRANCH="${BRANCH:-main}"
 NODE_MAJOR="${NODE_MAJOR:-22}"
 
-DB_NAME="${DB_NAME:-promptzer_crm}"
-DB_USER="${DB_USER:-promptzer}"
+DB_NAME="${DB_NAME:-proptimizr_crm}"
+DB_USER="${DB_USER:-proptimizr}"
 DB_PASS="${DB_PASS:-$(openssl rand -hex 16)}"
 
 SEED="${SEED:-yes}"                         # seed demo data on first deploy
@@ -226,8 +235,8 @@ cat <<DONE
   Database:   ${DB_NAME} (user ${DB_USER})
 
   Demo logins (password: 'password'):
-    owner@skyline.test · admin@skyline.test · agent@skyline.test
-    dealer@skyline.test · super@scalamatic.test
+    owner@proptimizr.test · admin@proptimizr.test · agent@proptimizr.test
+    dealer@proptimizr.test · support@proptimizr.com
 
   Redeploy after a push:  cd ${APP_DIR} && git pull && npm ci && npm run build && pm2 reload ${APP_NAME}
 DONE

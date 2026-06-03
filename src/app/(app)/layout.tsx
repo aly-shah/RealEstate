@@ -5,7 +5,9 @@ import { ROLE_LABELS, can } from "@/lib/rbac";
 import { Sidebar } from "@/components/shell/Sidebar";
 import { Topbar } from "@/components/shell/Topbar";
 import { AgentBottomNav } from "@/components/shell/AgentBottomNav";
+import { Toaster } from "@/components/ui/Toaster";
 import { getDict } from "@/lib/i18n/server";
+import { consumeFlash } from "@/lib/flash";
 
 export default async function AppLayout({
   children,
@@ -15,11 +17,14 @@ export default async function AppLayout({
   const user = await requireUser();
   const { locale, dict } = await getDict();
 
-  const [company, unreadCount] = await Promise.all([
+  const [company, unreadCount, flash] = await Promise.all([
     user.companyId
       ? prisma.company.findUnique({ where: { id: user.companyId }, select: { name: true } })
       : null,
     prisma.notification.count({ where: { userId: user.id, read: false } }),
+    // Drains the flash cookie set by any recent server action so the Toaster
+    // can show it once and move on.
+    consumeFlash(),
   ]);
 
   const isAgent = user.role === "AGENT";
@@ -50,6 +55,7 @@ export default async function AppLayout({
         </main>
       </div>
       {isAgent && <AgentBottomNav unreadCount={unreadCount} dict={dict} />}
+      <Toaster initial={flash} />
     </div>
   );
 }

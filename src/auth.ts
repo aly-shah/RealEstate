@@ -10,7 +10,15 @@ const credsSchema = z.object({
 });
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
-  session: { strategy: "jwt" },
+  // 8h max session, sliding by 1h on activity. Short enough that a forgotten
+  // logout on a shared device expires the same business day; long enough that
+  // an agent in the field doesn't get bumped mid-shift. Suspension is enforced
+  // independently via lib/user-status.ts (re-checked on every requireUser).
+  session: {
+    strategy: "jwt",
+    maxAge: 8 * 60 * 60,
+    updateAge: 60 * 60,
+  },
   pages: { signIn: "/login" },
   providers: [
     Credentials({

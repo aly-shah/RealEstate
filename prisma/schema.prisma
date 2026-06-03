@@ -33,6 +33,28 @@ enum CompanyStatus {
   TRIAL
 }
 
+// Subscription tier. Drives the per-tenant limits in lib/plans.ts (user count,
+// property count, etc.). PRO is uncapped. Values are deliberately small so
+// adding new tiers later doesn't require renaming.
+enum CompanyPlan {
+  FREE
+  TRIAL
+  STARTER
+  GROWTH
+  PRO
+}
+
+// Billing lifecycle, independent of CompanyStatus (which gates platform-level
+// access). A company can be billingStatus=PAST_DUE while still ACTIVE — the
+// app surfaces a warning but keeps working until ops decides to suspend.
+enum BillingStatus {
+  TRIAL
+  ACTIVE
+  GRACE
+  PAST_DUE
+  CANCELLED
+}
+
 enum PropertyType {
   RESIDENTIAL
   COMMERCIAL
@@ -41,6 +63,17 @@ enum PropertyType {
   VILLA
   SHOP
   OFFICE
+}
+
+// Area units common in the Pakistan real-estate market. MARLA + KANAL are the
+// inherited South-Asian land units (1 marla ≈ 272.25 sqft; 1 kanal = 20 marla).
+// The UI is responsible for surface conversion when displaying mixed inventory.
+enum AreaUnit {
+  SQFT
+  SQM
+  SQYD
+  MARLA
+  KANAL
 }
 
 enum ListingType {
@@ -89,6 +122,14 @@ enum LeadSource {
   OTHER
 }
 
+// Manual hot/warm/cold tag set by an owner/admin to override the computed
+// lead score. NULL means "use the auto-computed score" (see lib/lead-score.ts).
+enum LeadScoreOverride {
+  HOT
+  WARM
+  COLD
+}
+
 enum CalendarEventType {
   SHOWING
   MEETING
@@ -119,6 +160,12 @@ enum InterestLevel {
   MEDIUM
   LOW
   NONE
+}
+
+// GpsLog.kind: which side of a visit the location ping captures.
+enum GpsLogKind {
+  IN
+  OUT
 }
 
 enum DealType {
@@ -186,6 +233,13 @@ enum CommissionParty {
   DEALER
 }
 
+// Where the "co-agents" slice rolls when there are no co-agents on a deal —
+// either back to the main agent (default) or absorbed by the company.
+enum FallbackParty {
+  MAIN
+  COMPANY
+}
+
 enum DocumentType {
   CNIC_PASSPORT
   PROPERTY_DOCUMENT
@@ -203,10 +257,47 @@ enum NotificationType {
   PAYMENT_DUE
   PAYMENT_OVERDUE
   COMMISSION_APPROVAL
+  // Dedicated type so notifications-page filtering can distinguish a
+  // rejection from a generic system message.
+  COMMISSION_REJECTED
   VISIT_VERIFY
   DOCUMENT_EXPIRY
   LEAD_ASSIGNED
   GENERAL
+}
+
+// Channels a notification can be delivered through. Today only IN_APP rows
+// are created; the column is here so external-delivery work (Phase 9+) can
+// stamp the channel without a follow-on schema migration. The producer of a
+// non-IN_APP row would typically *also* still create an IN_APP twin so the
+// in-app feed stays canonical.
+enum NotificationChannel {
+  IN_APP
+  EMAIL
+  SMS
+  WHATSAPP
+}
+
+// Background-job lifecycle. The queue is Postgres-backed and walked by a
+// cron-driven /api/jobs/tick endpoint — see lib/jobs.ts + deploy/JOBS.md.
+enum JobStatus {
+  QUEUED
+  RUNNING
+  DONE
+  FAILED
+}
+
+// Phase-9 AI features. Each value names one prompt template — keep the list
+// narrow; new entries require both a handler under lib/ai/handlers/ and a
+// UI surface that triggers it. The body of the suggestion is stored on
+// AiSuggestion.content (Markdown-ish); per-month usage is counted by
+// scanning AiSuggestion rows so plan-budget enforcement doesn't need a
+// separate counter column.
+enum AiSuggestionType {
+  LEAD_NEXT_ACTION
+  LEAD_REPLY_DRAFT
+  WHATSAPP_INTENT
+  OWNER_WEEKLY_INSIGHT
 }
 
 // ─────────────────────────────────────────────────────────── Tenancy & users
@@ -214,8 +305,72 @@ enum NotificationType {
 model Company {
   id        String        @id @default(cuid())
   name      String
-  plan      String        @default("standard")
+  // URL-friendly identifier. Optional today; reserved for white-label routing
+  // (e.g. "clifton-heights.crm.proptimizr.com") in a future phase.
+  slug      String?       @unique
+  plan      CompanyPlan   @default(STARTER)
   status    CompanyStatus @default(ACTIVE)
+  // Per-tenant prefix for auto-generated property references (e.g. "CHR" → CHR-0001).
+  // Nullable — when missing, derived from `name` (see lib/refs.ts).
+  refPrefix String?
+
+  // White-label / regional fields. All nullable so existing tenants keep
+  // working with platform defaults until they actively set them.
+  //   - timezone: IANA name (e.g. "Asia/Karachi"). NULL ⇒ server local time.
+  //   - brandColor: hex accent ("#4f46e5") for invoice headers + emails.
+  //   - logoUrl: URL stored in /uploads or external — replaces the wordmark.
+  timezone   String?
+  brandColor String?
+  logoUrl    String?
+
+  // Phase 8 white-label / billing fields.
+  //   - invoiceFooter / receiptFooter: per-tenant override for the footer
+  //     text printed on invoice + receipt PDFs.
+  //   - whatsappSignature: replaces the default "{agent} — {company}" closer
+  //     on WhatsApp templates when set.
+  //   - billingStatus: subscription state separate from platform access.
+  //   - trialEndsAt / renewalAt: drives the trial-expiry + renewal-due UIs.
+  invoiceFooter     String?
+  receiptFooter     String?
+  whatsappSignature String?
+  billingStatus     BillingStatus @default(TRIAL)
+  trialEndsAt       DateTime?
+  renewalAt         DateTime?
+
+  // Phase-9 master switch. Owner can flip this off to disable every AI
+  // surface for the tenant — useful for clients with policy concerns or
+  // who simply don't want to pay for the feature even on plans that
+  // include it. Defaults true so existing tenants get the feature when
+  // their plan grants it. Plan-budget enforcement still runs on top of
+  // this flag; see lib/ai/budget.ts.
+  aiEnabled         Boolean       @default(true)
+
+  // Meta WhatsApp Cloud API `phone_number_id` for this tenant's business
+  // line. Used by the inbound webhook to route messages to the correct
+  // company — every WA payload carries `metadata.phone_number_id`, we
+  // look up the Company here. Unique so two tenants can't claim the
+  // same line. NULL until the operator pastes the id in from Business
+  // Manager (UI lives on the Settings page).
+  whatsappPhoneId   String?       @unique
+
+  // Meta long-lived access token used for OUTBOUND sends via the
+  // Cloud API (lib/wa-business.ts → POST graph.facebook.com).
+  // Stored AES-256-GCM-encrypted via lib/crypto.ts (envelope prefix
+  // `enc:v1:`); the key is derived from AUTH_SECRET. Settings UI
+  // shows a masked placeholder + "Replace" affordance; the cleartext
+  // never reaches the client. NULL ⇒ outbound disabled, wa.me links
+  // remain the fallback. See deploy/AI.md "At-rest encryption" and
+  // deploy/ROTATION.md.
+  whatsappAccessToken String?
+
+  // Meta WhatsApp Business Account (WABA) id — the "business" object
+  // that owns approved message templates. Distinct from phone_number_id
+  // (a WABA can host multiple phone lines). Required for the template
+  // catalog sync: GET /v21.0/<wabaId>/message_templates returns the
+  // tenant's approved templates which the UI then dropdown-selects.
+  // NULL ⇒ template-send dropdown is empty + Settings prompts for it.
+  whatsappBusinessAccountId String?
+
   // soft settings stored as JSON (currency, locale, defaults)
   settings  Json?
   createdAt DateTime      @default(now())
@@ -237,6 +392,8 @@ model Company {
   documents       Document[]
   activityLogs    ActivityLog[]
   notifications   Notification[]
+  aiSuggestions   AiSuggestion[]
+  whatsappTemplates WhatsAppTemplate[]
 }
 
 model User {
@@ -252,6 +409,11 @@ model User {
   avatarUrl    String?
   // private admin remark about an agent + agent's own bio note
   remark       String?
+  // Throttled write (~1/min) from requireUser — powers dormant-account
+  // detection + "active just now" UI affordances without a separate
+  // analytics table. NULL means the user hasn't been seen since this
+  // column was added.
+  lastSeenAt   DateTime?
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
@@ -269,6 +431,12 @@ model User {
   approvedComms     Commission[]    @relation("CommApprover")
 
   @@index([companyId])
+  // Hot path: every "list this tenant's agents" lookup — 4+ call sites
+  // (leads/new, leads/[id], deals/new, calendar). Without this composite
+  // PG falls back to the @@index([companyId]) scan + in-memory role filter.
+  @@index([companyId, role])
+  // Cross-tenant role queries are rare (SUPER_ADMIN console) but kept
+  // because the table is small and the write overhead is negligible.
   @@index([role])
 }
 
@@ -284,6 +452,8 @@ model Project {
   area        String?
   isOffPlan   Boolean    @default(false)
   createdAt   DateTime   @default(now())
+  // @default(now()) backfills existing rows on migration; @updatedAt drives future updates.
+  updatedAt   DateTime   @default(now()) @updatedAt
   properties  Property[]
 
   @@index([companyId])
@@ -304,10 +474,15 @@ model Dealer {
   defaultSharePct Decimal    @default(0) @db.Decimal(5, 2)
   notes           String?
   createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @default(now()) @updatedAt
 
   properties Property[]
   deals      Deal[]
   documents  Document[]
+  // Historical commission shares paid out to this dealer. Modeled (vs. raw
+  // dealerId String) so deleting a dealer set-nulls the share rather than
+  // erroring out, and ad-hoc queries can join via the relation.
+  commissionShares CommissionShare[]
 
   @@index([companyId])
 }
@@ -324,11 +499,14 @@ model Property {
   status      PropertyStatus @default(PENDING_VERIFICATION)
 
   projectId String?
-  project   Project? @relation(fields: [projectId], references: [id])
+  // SetNull: deleting a project shouldn't error out properties belonging to it.
+  project   Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
 
   // supplier: either a dealer or a private owner captured inline
   dealerId   String?
-  dealer     Dealer? @relation(fields: [dealerId], references: [id])
+  // SetNull: deleting a dealer orphans (but preserves) the property; ownerName
+  // fallback covers the supplier-side displayed in the UI.
+  dealer     Dealer? @relation(fields: [dealerId], references: [id], onDelete: SetNull)
   ownerName  String?
   ownerPhone String?
 
@@ -349,7 +527,9 @@ model Property {
   // size & layout
   coveredArea Float?
   plotSize    Float?
-  areaUnit    String?  @default("sqft")
+  // Defaults to SQFT (covers >90% of urban Karachi inventory); switch per
+  // listing for plots / villas typically measured in MARLA / KANAL.
+  areaUnit    AreaUnit? @default(SQFT)
   bedrooms    Int?
   bathrooms   Int?
   floors      Int?
@@ -362,7 +542,8 @@ model Property {
 
   // commission override
   commissionRuleId String?
-  commissionRule   CommissionRule? @relation(fields: [commissionRuleId], references: [id])
+  // SetNull: deleting a rule falls the property back to the company default.
+  commissionRule   CommissionRule? @relation(fields: [commissionRuleId], references: [id], onDelete: SetNull)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -377,7 +558,16 @@ model Property {
 
   @@unique([companyId, reference])
   @@index([companyId])
-  @@index([status])
+  // Composite — used by every filtered list query (status filter + tenant scope).
+  // The pre-refinement @@index([status]) only served cross-tenant queries
+  // the codebase doesn't make; dropped to reduce write overhead.
+  @@index([companyId, status])
+  // Speeds map page (`latitude is not null` filter is selective).
+  @@index([dealerId])
+  // Phase 5 added a city filter on /properties — case-insensitive exact match
+  // benefits from an index on the raw column (Postgres still seq-scans for
+  // ILIKE but the equality lookup hits this).
+  @@index([companyId, city])
 }
 
 model PropertyMedia {
@@ -415,6 +605,7 @@ model Client {
   address     String?
   notes       String?
   createdAt   DateTime @default(now())
+  updatedAt   DateTime @default(now()) @updatedAt
 
   leads     Lead[]
   showings  Showing[]
@@ -423,6 +614,9 @@ model Client {
   documents Document[]
 
   @@index([companyId])
+  // Speeds up the de-dup lookup in createLead (phone / email match within a tenant).
+  @@index([companyId, phone])
+  @@index([companyId, email])
 }
 
 model Lead {
@@ -430,11 +624,15 @@ model Lead {
   companyId String
   company   Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
   clientId  String?
-  client    Client?    @relation(fields: [clientId], references: [id])
+  // SetNull: client deletion shouldn't cascade-destroy historical leads; the
+  // lead's stage + lostReason carry the business meaning even if client is gone.
+  client    Client?    @relation(fields: [clientId], references: [id], onDelete: SetNull)
   agentId   String?
-  agent     User?      @relation("LeadAgent", fields: [agentId], references: [id])
+  // SetNull: deleting an agent un-assigns their leads (admins can reassign).
+  agent     User?      @relation("LeadAgent", fields: [agentId], references: [id], onDelete: SetNull)
   propertyId String?
-  property  Property?  @relation(fields: [propertyId], references: [id])
+  // SetNull: deleting a property unlinks the lead but the enquiry stays.
+  property  Property?  @relation(fields: [propertyId], references: [id], onDelete: SetNull)
 
   stage  LeadStage  @default(NEW)
   source LeadSource @default(OTHER)
@@ -444,20 +642,47 @@ model Lead {
   budgetMax    Decimal?     @db.Decimal(14, 2)
   prefType     PropertyType?
   prefArea     String?
-  prefSize     String?
   requirements String?
 
   notes      String?
   lostReason String?
+  // Admin-set hot/warm/cold tag that overrides the computed score when present.
+  scoreOverride LeadScoreOverride?
+  // Free-text portal tag set by CSV/portal imports — "ZAMEEN", "GRAANA",
+  // "OLX", "FACEBOOK", "CSV". Kept as a string (not an enum) so the operator
+  // can add new portals without a schema migration.
+  importSource String?
+  // Explicit signal of when this lead was last meaningfully contacted —
+  // updated by recordShowing + by marking a SHOWING/MEETING/FOLLOW_UP
+  // calendar event DONE. Replaces `updatedAt` as the freshness proxy for
+  // stale-lead detection so editing notes or assigning an agent doesn't
+  // falsely "refresh" the lead. NULL falls back to createdAt at the
+  // computation layer (see lib/lead-health.ts).
+  lastContactedAt DateTime?
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
-  events CalendarEvent[]
-  deals  Deal[]
+  events    CalendarEvent[]
+  deals     Deal[]
+  showings  Showing[]
 
   @@index([companyId])
   @@index([agentId])
-  @@index([stage])
+  // Funnel + recency: every leads-list query orders by updatedAt within scope.
+  // The leading `companyId` column also satisfies the rare stage-only filter
+  // when combined with the tenant gate — the bare @@index([stage]) it
+  // replaced only served cross-tenant queries the codebase doesn't make.
+  @@index([companyId, stage, updatedAt])
+  // "Leads interested in property X" — used on the property detail page.
+  @@index([propertyId])
+  // "Leads for client X" — for the client-dedup activity trail.
+  @@index([clientId])
+  // Phase 5: portal-source reporting ("how many leads from Zameen this month").
+  @@index([companyId, importSource])
+  // Phase 7 reports filter by createdAt range (leadSourceConversion,
+  // funnelDropoff) — without this index every report-page render scans the
+  // full lead table per tenant.
+  @@index([companyId, createdAt])
 }
 
 model CalendarEvent {
@@ -465,11 +690,13 @@ model CalendarEvent {
   companyId  String
   company    Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
   agentId    String?
-  agent      User?               @relation(fields: [agentId], references: [id])
+  // SetNull on all three optional FKs so deleting an agent/lead/property
+  // unlinks but preserves the historical schedule.
+  agent      User?               @relation(fields: [agentId], references: [id], onDelete: SetNull)
   leadId     String?
-  lead       Lead?               @relation(fields: [leadId], references: [id])
+  lead       Lead?               @relation(fields: [leadId], references: [id], onDelete: SetNull)
   propertyId String?
-  property   Property?           @relation(fields: [propertyId], references: [id])
+  property   Property?           @relation(fields: [propertyId], references: [id], onDelete: SetNull)
 
   type      CalendarEventType
   status    CalendarEventStatus @default(SCHEDULED)
@@ -478,10 +705,15 @@ model CalendarEvent {
   startAt   DateTime
   endAt     DateTime?
   createdAt DateTime            @default(now())
+  updatedAt DateTime            @default(now()) @updatedAt
 
   @@index([companyId])
   @@index([agentId])
   @@index([startAt])
+  // "Today's schedule" for a tenant — narrows by company + day range.
+  @@index([companyId, startAt])
+  // Events from a specific lead (lead detail page sidebar).
+  @@index([leadId])
 }
 
 model Showing {
@@ -489,13 +721,22 @@ model Showing {
   companyId  String
   company    Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
   agentId    String
+  // Agent + property are required FKs; the deal-style historical record
+  // demands their presence, so a delete is intentionally blocked here.
   agent      User     @relation(fields: [agentId], references: [id])
   clientId   String?
-  client     Client?  @relation(fields: [clientId], references: [id])
+  // SetNull: client deletion shouldn't erase the showing record.
+  client     Client?  @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  // Optional link back to the lead that triggered the visit. Multiple
+  // pages (leads list, lead detail, AI assistant) need "showings for
+  // this lead" without conflating it with "showings for this client" —
+  // one client may have several active leads on different properties.
+  // SetNull so deleting a lead doesn't orphan the historical visit.
+  leadId     String?
+  lead       Lead?    @relation(fields: [leadId], references: [id], onDelete: SetNull)
   propertyId String
   property   Property @relation(fields: [propertyId], references: [id])
 
-  scheduledAt    DateTime?
   checkInAt      DateTime?
   checkOutAt     DateTime?
   checkInLat     Float?
@@ -504,24 +745,34 @@ model Showing {
   notes          String?
   clientFeedback String?
   interestLevel  InterestLevel?
-  photos         String[]
   verification   VerificationStatus @default(PENDING)
   createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @default(now()) @updatedAt
 
   gpsLogs GpsLog[]
 
   @@index([companyId])
   @@index([agentId])
+  // "Visits to verify" admin queue + "active days" per agent both filter by
+  // tenant + checkInAt within a recent window.
+  @@index([companyId, checkInAt])
+  // Property detail page lists showings for a property.
+  @@index([propertyId])
+  // Lead detail page + AI handlers list showings for a lead.
+  @@index([leadId])
+  // Phase 7: visit-verification-rate report buckets by createdAt — including
+  // attempted visits that never reached a checkIn.
+  @@index([companyId, createdAt])
 }
 
 model GpsLog {
-  id        String   @id @default(cuid())
+  id        String     @id @default(cuid())
   showingId String
-  showing   Showing  @relation(fields: [showingId], references: [id], onDelete: Cascade)
-  kind      String // "IN" | "OUT"
+  showing   Showing    @relation(fields: [showingId], references: [id], onDelete: Cascade)
+  kind      GpsLogKind
   latitude  Float
   longitude Float
-  capturedAt DateTime @default(now())
+  capturedAt DateTime  @default(now())
 
   @@index([showingId])
 }
@@ -539,17 +790,22 @@ model Deal {
   agreement  AgreementStatus @default(NONE)
 
   propertyId String
+  // Property is required for a deal; deletion is intentionally blocked here.
   property   Property @relation(fields: [propertyId], references: [id])
   clientId   String?
-  client     Client?  @relation(fields: [clientId], references: [id])
+  // All three optional FKs SetNull: deals are the immutable revenue record
+  // and must survive the deletion of their counterparties.
+  client     Client?  @relation(fields: [clientId], references: [id], onDelete: SetNull)
   dealerId   String?
-  dealer     Dealer?  @relation(fields: [dealerId], references: [id])
+  dealer     Dealer?  @relation(fields: [dealerId], references: [id], onDelete: SetNull)
   leadId     String?
-  lead       Lead?    @relation(fields: [leadId], references: [id])
+  lead       Lead?    @relation(fields: [leadId], references: [id], onDelete: SetNull)
 
-  closeDate DateTime?
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  closeDate  DateTime?
+  // Populated when status transitions to CLOSED_LOST (required at UI + action).
+  lostReason String?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
 
   agents     DealAgent[]
   sale       Sale?
@@ -561,7 +817,12 @@ model Deal {
 
   @@unique([companyId, reference])
   @@index([companyId])
-  @@index([status])
+  // Revenue trend + month KPIs filter by companyId + status + closeDate.
+  // The pre-refinement bare @@index([status]) was cross-tenant; dropped.
+  @@index([companyId, closeDate])
+  // Deals derived from a specific lead (lead detail page sidebar).
+  @@index([leadId])
+  @@index([dealerId])
 }
 
 model DealAgent {
@@ -583,7 +844,6 @@ model Sale {
   tokenAmount   Decimal? @db.Decimal(14, 2)
   bookingAmount Decimal? @db.Decimal(14, 2)
   downPayment   Decimal? @db.Decimal(14, 2)
-  instalmentPlan String?
 }
 
 model Rental {
@@ -592,7 +852,6 @@ model Rental {
   deal            Deal      @relation(fields: [dealId], references: [id], onDelete: Cascade)
   monthlyRent     Decimal   @db.Decimal(14, 2)
   deposit         Decimal?  @db.Decimal(14, 2)
-  rentalCommission Decimal? @db.Decimal(14, 2)
   leaseMonths     Int?
   renewalDate     DateTime?
 }
@@ -602,7 +861,13 @@ model Payment {
   companyId String
   company   Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
   dealId    String?
-  deal      Deal?         @relation(fields: [dealId], references: [id])
+  // SetNull: a payment record is preserved (for accounting) even if its deal
+  // is removed. Reconciliation falls back to the in-row metadata.
+  deal      Deal?         @relation(fields: [dealId], references: [id], onDelete: SetNull)
+  invoiceId String?
+  // SetNull: same reasoning as deal — the payment row is the source of truth
+  // for "money received"; invoice gone shouldn't drop the receipt.
+  invoice   Invoice?      @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
   type      PaymentType
   amount    Decimal       @db.Decimal(14, 2)
   status    PaymentStatus @default(PENDING)
@@ -612,9 +877,19 @@ model Payment {
   paidAt    DateTime?
   notes     String?
   createdAt DateTime      @default(now())
+  updatedAt DateTime      @default(now()) @updatedAt
 
   @@index([companyId])
-  @@index([status])
+  // Overdue scan: companyId + dueDate (+ status filter applied by query).
+  // The pre-refinement bare @@index([status]) only served cross-tenant
+  // queries the codebase doesn't make; dropped to reduce write cost.
+  @@index([companyId, dueDate])
+  // Per-deal payment history pulls by dealId; with most deals having ≤10
+  // payments, the index keeps the join fast at scale.
+  @@index([dealId])
+  // Per-invoice payment sum — drives auto-promotion of Invoice.status when
+  // payments cover the issued amount.
+  @@index([invoiceId])
 }
 
 model Invoice {
@@ -622,16 +897,32 @@ model Invoice {
   companyId String
   company   Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
   dealId    String?
-  deal      Deal?         @relation(fields: [dealId], references: [id])
+  // SetNull: invoices outlive their underlying deal record for audit.
+  deal      Deal?         @relation(fields: [dealId], references: [id], onDelete: SetNull)
   clientId  String?
-  client    Client?       @relation(fields: [clientId], references: [id])
+  client    Client?       @relation(fields: [clientId], references: [id], onDelete: SetNull)
   number    String
   amount    Decimal       @db.Decimal(14, 2)
   status    InvoiceStatus @default(ISSUED)
+  // Optional free-text invoice-line description ("Booking instalment 2/4").
+  description String?
+  // Optional footer for printed invoices ("Thank you for your business.")
+  // — overrides the per-company default when set.
+  footer      String?
   issuedAt  DateTime      @default(now())
   dueDate   DateTime?
+  updatedAt DateTime      @default(now()) @updatedAt
+
+  payments Payment[]
 
   @@index([companyId])
+  // Prevent duplicate invoice numbers within a tenant. NOTE: safe to add only
+  // when no UI creates invoices yet (Phase 3 work); if you've back-loaded
+  // invoices manually, run dedupe SQL before `prisma db push`.
+  @@unique([companyId, number])
+  // List page filters by status; index supports the "draft/issued/paid/overdue"
+  // tabs without sequential scan.
+  @@index([companyId, status])
 }
 
 model CommissionRule {
@@ -644,8 +935,8 @@ model CommissionRule {
   companyPct    Decimal  @default(25) @db.Decimal(5, 2)
   otherAgentPct Decimal  @default(25) @db.Decimal(5, 2)
   dealerPct     Decimal  @default(0) @db.Decimal(5, 2)
-  // where the "other agents" portion goes if there are none: MAIN | COMPANY
-  noOtherFallback String @default("MAIN")
+  // Where the "co-agents" portion goes when no co-agents are on the deal.
+  noOtherFallback FallbackParty @default(MAIN)
   createdAt     DateTime @default(now())
 
   properties Property[]
@@ -662,13 +953,21 @@ model Commission {
   totalAmount Decimal          @db.Decimal(14, 2)
   status      CommissionStatus @default(DRAFT)
   approvedById String?
-  approvedBy   User?           @relation("CommApprover", fields: [approvedById], references: [id])
+  // SetNull: a deleted approver shouldn't drop the historical commission row.
+  approvedBy   User?           @relation("CommApprover", fields: [approvedById], references: [id], onDelete: SetNull)
   approvedAt  DateTime?
+  // Optional context captured at approval time ("Approved with reduced co-agent share").
+  // Rejection deletes the commission entirely; the reason is captured in
+  // ActivityLog meta and queryable from there, so no rejectionReason column.
+  approvalNote    String?
   createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @default(now()) @updatedAt
 
   shares CommissionShare[]
 
   @@index([companyId])
+  // Approval queue + commission totals widget filter by tenant + status.
+  @@index([companyId, status])
 }
 
 model CommissionShare {
@@ -677,15 +976,25 @@ model CommissionShare {
   commission   Commission      @relation(fields: [commissionId], references: [id], onDelete: Cascade)
   party        CommissionParty
   userId       String?
-  user         User?           @relation(fields: [userId], references: [id])
+  // SetNull: deleted agents lose the linkage but the historical amount/label
+  // remain — important for audit and for "Company" / "Dealer" parties anyway.
+  user         User?           @relation(fields: [userId], references: [id], onDelete: SetNull)
   dealerId     String?
+  // Now a proper FK (was a bare String). SetNull mirrors the user-side.
+  dealer       Dealer?         @relation(fields: [dealerId], references: [id], onDelete: SetNull)
   label        String
   pct          Decimal         @db.Decimal(5, 2)
   amount       Decimal         @db.Decimal(14, 2)
   paid         Boolean         @default(false)
   paidAt       DateTime?
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @default(now()) @updatedAt
 
   @@index([commissionId])
+  // Per-agent earnings (agent profile + agent dashboard "pending/earned").
+  @@index([userId])
+  // Per-dealer earnings (dealer dashboard + dealer detail page).
+  @@index([dealerId])
 }
 
 // ─────────────────────────────────────────────────────────── Documents & system
@@ -701,25 +1010,38 @@ model Document {
 
   verification VerificationStatus @default(PENDING)
   verifiedById String?
-  verifiedBy   User?              @relation("DocVerifier", fields: [verifiedById], references: [id])
+  // SetNull: deleted verifier shouldn't cascade-drop the verification record.
+  verifiedBy   User?              @relation("DocVerifier", fields: [verifiedById], references: [id], onDelete: SetNull)
   expiryDate   DateTime?
 
   uploadedById String?
-  uploadedBy   User?    @relation("DocUploader", fields: [uploadedById], references: [id])
+  uploadedBy   User?    @relation("DocUploader", fields: [uploadedById], references: [id], onDelete: SetNull)
 
-  // polymorphic-ish links
+  // polymorphic-ish links — each SetNull so the document survives when the
+  // linked subject is removed (document is a fact in its own right).
   propertyId String?
-  property   Property? @relation(fields: [propertyId], references: [id])
+  property   Property? @relation(fields: [propertyId], references: [id], onDelete: SetNull)
   clientId   String?
-  client     Client?   @relation(fields: [clientId], references: [id])
+  client     Client?   @relation(fields: [clientId], references: [id], onDelete: SetNull)
   dealerId   String?
-  dealer     Dealer?   @relation(fields: [dealerId], references: [id])
+  dealer     Dealer?   @relation(fields: [dealerId], references: [id], onDelete: SetNull)
   dealId     String?
-  deal       Deal?     @relation(fields: [dealId], references: [id])
+  deal       Deal?     @relation(fields: [dealId], references: [id], onDelete: SetNull)
 
   createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
 
   @@index([companyId])
+  // "Docs to check" admin KPI + the documents page status filter.
+  @@index([companyId, verification])
+  // "Expiring soon" / "Expired" badges scan by tenant + expiryDate. The
+  // pre-refinement standalone @@index([expiryDate]) was cross-tenant and
+  // never picked — every document query filters by companyId first.
+  @@index([companyId, expiryDate])
+  // Documents list page orders by createdAt desc within tenant.
+  @@index([companyId, createdAt])
+  // Property detail page lists docs by propertyId.
+  @@index([propertyId])
 }
 
 model ActivityLog {
@@ -727,7 +1049,8 @@ model ActivityLog {
   companyId  String
   company    Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
   userId     String?
-  user       User?    @relation(fields: [userId], references: [id])
+  // SetNull: an audit log is preserved as "System" if the actor is deleted.
+  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
   action     String
   entityType String
   entityId   String?
@@ -736,21 +1059,175 @@ model ActivityLog {
   createdAt  DateTime @default(now())
 
   @@index([companyId])
-  @@index([entityType, entityId])
+  // Entity-scoped timeline (lead/property detail pages). Composite is fully
+  // tenant-scoped + naturally sorted, so the lead-detail query
+  //   WHERE companyId AND entityType='LEAD' AND entityId=X ORDER BY createdAt DESC
+  // hits a single index range scan instead of cross-tenant entity lookup
+  // + sort. Replaces the pre-refinement @@index([entityType, entityId]).
+  @@index([companyId, entityType, entityId, createdAt])
+  // /activity page + 30-day metrics order by tenant + createdAt desc.
+  @@index([companyId, createdAt])
+  // Per-user activity (agent profile timeline + /activity ?user= filter).
+  @@index([userId])
 }
 
 model Notification {
-  id        String           @id @default(cuid())
+  id        String              @id @default(cuid())
   companyId String
-  company   Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  company   Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
   userId    String
-  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  type      NotificationType @default(GENERAL)
+  user      User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      NotificationType    @default(GENERAL)
+  // Delivery channel — defaults IN_APP. External-delivery integrations
+  // (Phase 9+) populate non-IN_APP rows; the in-app feed query filters to
+  // IN_APP so it doesn't show "sent SMS" entries as if they were unread alerts.
+  channel   NotificationChannel @default(IN_APP)
   title     String
   body      String?
   link      String?
-  read      Boolean          @default(false)
-  createdAt DateTime         @default(now())
+  read      Boolean             @default(false)
+  createdAt DateTime            @default(now())
 
   @@index([userId, read])
+  // /notifications orders by createdAt desc; pairs with the (userId, read) one
+  // which serves the topbar/sidebar unread-count badge.
+  @@index([userId, createdAt])
+}
+
+// Phase-8.5 background-job queue. Intentionally minimal — no Redis, no
+// external workers; a cron-driven /api/jobs/tick endpoint reads QUEUED rows
+// with runAt<=now, dispatches via lib/jobs.ts handlers, and writes back
+// DONE/FAILED. Good enough for trial-expiry sweeps, WhatsApp inbound
+// processing, and the small batches AI features will need.
+//
+// companyId is nullable: platform-level jobs (e.g. cross-tenant trial sweep)
+// pass null; tenant-scoped jobs (per-company AI runs) set it.
+model Job {
+  id           String    @id @default(cuid())
+  companyId    String?
+  type         String
+  payload      Json?
+  status       JobStatus @default(QUEUED)
+  runAt        DateTime  @default(now())
+  attempts     Int       @default(0)
+  maxAttempts  Int       @default(3)
+  result       Json?
+  error        String?
+  // Set when the runner flips the row to RUNNING. Distinct from startedAt
+  // so the reaper sweep can detect "RUNNING but never finished" rows
+  // (server crashed mid-job) and reset them back to QUEUED.
+  claimedAt    DateTime?
+  startedAt    DateTime?
+  finishedAt   DateTime?
+  // Producer-supplied dedup key. Combined with `type` in a unique index so
+  // a webhook retry (Meta retries on timeout) doesn't enqueue the same
+  // message twice — enqueueJob catches P2002 and returns the original id.
+  // NULL is allowed and repeats freely (multi-NULL is fine in Postgres).
+  idempotencyKey String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @default(now()) @updatedAt
+
+  // Hot path: the tick endpoint scans QUEUED + due rows.
+  @@index([status, runAt])
+  // Admin view filters by status (FAILED first) — fast even at scale.
+  @@index([status, createdAt])
+  // Retention purge scans DONE rows older than the TTL — separate index so
+  // the cleanup query doesn't fight the admin-view index.
+  @@index([status, finishedAt])
+  // Tenant-scoped queries (per-company job history).
+  @@index([companyId])
+  @@index([type])
+  // Webhook retry dedup. Type-scoped so different job types can reuse keys
+  // (e.g. a message id might be unique within whatsapp.inbound but collide
+  // with an unrelated payload id in some other type).
+  @@unique([type, idempotencyKey])
+}
+
+// Phase-9 AI output cache + audit trail. One row per Claude call —
+// repeated clicks within the cache window (~30 min) return the existing
+// suggestion instead of re-hitting the API. Doubles as the data source
+// for monthly per-tenant budget enforcement (lib/ai/budget.ts) and the
+// transparency surface "AI was used N times this month" on Settings.
+//
+// Polymorphic entity link: entityType + entityId point at whichever
+// record the suggestion is about (a Lead for LEAD_NEXT_ACTION, a
+// Company for OWNER_WEEKLY_INSIGHT, etc.) — no FK so the row outlives
+// the entity if it's deleted.
+model AiSuggestion {
+  id         String           @id @default(cuid())
+  companyId  String
+  company    Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  type       AiSuggestionType
+  entityType String
+  entityId   String
+  // Markdown-ish body. Capped at ~4KB at the producer layer so a
+  // runaway model response can't blow up the row.
+  content    String           @db.Text
+  // SHA-256 of the canonical inputs used to build the prompt. Producer
+  // checks this on every call: matching hash + within the freshness
+  // window ⇒ reuse the existing row instead of paying for another
+  // Claude call. Recomputed when inputs change (lead stage moves,
+  // new activity, etc.) so stale rows are naturally bypassed.
+  // VarChar(64) signals "this is a hex digest" — any future hash change
+  // (e.g. SHA-512) trips a column-length error rather than silently
+  // truncating into garbage.
+  inputHash  String   @db.VarChar(64)
+  // Token accounting for the monthly budget check + future cost dashboard.
+  // cachedTokens captures Anthropic prompt-cache hits separately so the
+  // operator can see caching working.
+  promptTokens     Int   @default(0)
+  completionTokens Int   @default(0)
+  cachedTokens     Int   @default(0)
+  createdAt        DateTime @default(now())
+
+  // Lookup-by-entity is the hot path (lead-detail page checks for an
+  // existing suggestion before calling Claude).
+  @@index([companyId, type, entityType, entityId])
+  // Monthly budget aggregate scans createdAt within the company.
+  @@index([companyId, createdAt])
+}
+
+// Phase-9.5 risk fix — local mirror of the tenant's Meta-approved
+// WhatsApp message templates. Synced from
+// GET /v21.0/<whatsappBusinessAccountId>/message_templates via the
+// "Sync templates" button in Settings → Integrations; refreshed on
+// demand (we don't poll, owners curate templates rarely).
+//
+// `status` mirrors Meta's lifecycle (APPROVED / PENDING / REJECTED /
+// PAUSED / DISABLED) so the send UI can show only APPROVED entries
+// while the Settings list keeps the full picture for triage.
+//
+// `bodyText` stores the template's body component verbatim so the
+// UI can render a preview without re-fetching the catalog; the
+// computed `paramCount` is the highest {{N}} placeholder in the
+// body, used to size the parameter inputs.
+model WhatsAppTemplate {
+  id         String   @id @default(cuid())
+  companyId  String
+  company    Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  // Meta's template `name` is unique within a (WABA, language) pair.
+  name       String
+  // ISO-ish locale code Meta returns — "en", "en_US", "ur", etc.
+  language   String
+  // UTILITY / MARKETING / AUTHENTICATION — surface only.
+  category   String
+  // APPROVED / PENDING / REJECTED / PAUSED / DISABLED.
+  status     String
+  // Body component text with {{N}} placeholders intact.
+  bodyText   String   @db.Text
+  // Highest {{N}} placeholder in bodyText — 0 for templates with no
+  // variables. Computed at sync time so the UI doesn't re-parse.
+  paramCount Int      @default(0)
+  // Optional TEXT header — Meta also supports MEDIA headers (image/video/
+  // document) which require URL uploads; those land in `headerText`
+  // empty and are surfaced in the UI as "media header (not yet
+  // supported by the send form)". headerParamCount mirrors paramCount
+  // semantics but for the header's {{N}} placeholders.
+  headerText      String? @db.Text
+  headerParamCount Int    @default(0)
+  syncedAt   DateTime @default(now())
+
+  // Send UI lists APPROVED templates per tenant.
+  @@unique([companyId, name, language])
+  @@index([companyId, status])
 }

@@ -37,11 +37,20 @@ export default async function CompaniesPage() {
       </Section>
 
       <Section title="All companies">
-        <Table head={["Company", "Plan", "Users", "Properties", "Deals", "Created", "Status", ""]}>
+        <Table head={["Company", "Plan", "Billing", "Users", "Properties", "Deals", "Created", "Status", ""]}>
           {companies.map((c) => (
             <tr key={c.id} className="hover:bg-line-soft">
-              <Td className="font-medium text-ink">{c.name}</Td>
+              <Td className="font-medium text-ink">
+                {c.name}
+                {c.slug && <div className="text-xs text-muted" data-keep-latin>/{c.slug}</div>}
+              </Td>
               <Td className="text-xs">{c.plan}</Td>
+              <Td className="text-xs">
+                <StatusBadge status={c.billingStatus} />
+                {c.trialEndsAt && c.billingStatus === "TRIAL" && (
+                  <div className="mt-1 text-[10px] text-muted">ends {fmtDate(c.trialEndsAt)}</div>
+                )}
+              </Td>
               <Td>{c._count.users}</Td>
               <Td>{c._count.properties}</Td>
               <Td>{c._count.deals}</Td>

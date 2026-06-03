@@ -175,3 +175,84 @@ export async function inventorySnapshot(companyId: string): Promise<Record<strin
   });
   return Object.fromEntries(grouped.map((g) => [g.status, g._count._all]));
 }
+
+export interface PayoutByRecipient {
+  id: string;
+  name: string;
+  party: "AGENT_MAIN" | "AGENT_OTHER" | "DEALER" | "COMPANY";
+  paid: number;
+  pending: number;
+}
+
+export interface PayoutSummary {
+  byRecipient: PayoutByRecipient[];
+  byParty: Record<string, { paid: number; pending: number }>;
+  totals: { paid: number; pending: number };
+}
+
+/**
+ * Aggregates commission shares into per-recipient + per-party totals. Powers
+ * the "Commission payouts" panel on the reports page — owners need a single
+ * view of who has been paid vs who is still owed money.
+ *
+ * Recipient resolution:
+ *   - AGENT_MAIN / AGENT_OTHER → user name (or "Unknown agent" if SetNull-ed)
+ *   - DEALER                   → dealer name (or "Unknown dealer")
+ *   - COMPANY                  → aggregated under a single "Company" line
+ */
+export async function payoutSummary(companyId: string): Promise<PayoutSummary> {
+  const shares = await prisma.commissionShare.findMany({
+    where: { commission: { companyId, status: { in: ["APPROVED", "PAID"] } } },
+    select: {
+      party: true,
+      amount: true,
+      paid: true,
+      userId: true,
+      dealerId: true,
+      user: { select: { id: true, name: true } },
+      dealer: { select: { id: true, name: true } },
+    },
+  });
+
+  const recipMap = new Map<string, PayoutByRecipient>();
+  const partyMap: Record<string, { paid: number; pending: number }> = {};
+  let totalPaid = 0;
+  let totalPending = 0;
+
+  for (const s of shares) {
+    const amt = toNumber(s.amount);
+    if (s.paid) totalPaid += amt;
+    else totalPending += amt;
+
+    if (!partyMap[s.party]) partyMap[s.party] = { paid: 0, pending: 0 };
+    partyMap[s.party][s.paid ? "paid" : "pending"] += amt;
+
+    // Identity key per recipient — collapses multiple shares to one row.
+    let key: string;
+    let name: string;
+    if (s.party === "COMPANY") {
+      key = "company";
+      name = "Company";
+    } else if (s.party === "DEALER") {
+      key = `dealer:${s.dealerId ?? "unknown"}`;
+      name = s.dealer?.name ?? "Unknown dealer";
+    } else {
+      key = `user:${s.userId ?? "unknown"}`;
+      name = s.user?.name ?? "Unknown agent";
+    }
+
+    const existing = recipMap.get(key) ?? { id: key, name, party: s.party, paid: 0, pending: 0 };
+    existing[s.paid ? "paid" : "pending"] += amt;
+    recipMap.set(key, existing);
+  }
+
+  const byRecipient = [...recipMap.values()].sort(
+    (a, b) => b.paid + b.pending - (a.paid + a.pending),
+  );
+
+  return {
+    byRecipient,
+    byParty: partyMap,
+    totals: { paid: totalPaid, pending: totalPending },
+  };
+}
