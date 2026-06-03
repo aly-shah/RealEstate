@@ -17,12 +17,6 @@ export function localizeDigits(value: string | number, locale: Locale = "en"): s
   return s.replace(/[0-9]/g, (d) => URDU_DIGITS[Number(d)]);
 }
 
-const currencyEn = new Intl.NumberFormat("en-PK", {
-  style: "currency",
-  currency: "PKR",
-  maximumFractionDigits: 0,
-});
-
 const groupedEn = new Intl.NumberFormat("en-PK", { maximumFractionDigits: 0 });
 
 /** Money formatter. PKR-prefixed in English, "روپے" prefix in Urdu. */
@@ -31,7 +25,7 @@ export function money(value: Decimalish, locale: Locale = "en"): string {
   if (locale === "ur") {
     return `${localizeDigits(groupedEn.format(n), "ur")} روپے`;
   }
-  return currencyEn.format(n);
+  return `PKR ${groupedEn.format(n)}`;
 }
 
 export function compactMoney(value: Decimalish, locale: Locale = "en"): string {

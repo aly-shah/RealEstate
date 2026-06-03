@@ -1,18 +1,20 @@
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
+import { encryptSecret, decryptSecret, isEncrypted } from "@/lib/crypto";
 
 /**
  * Crypto tests need AUTH_SECRET to derive the envelope key. Set it
  * here for the test run rather than requiring the operator to set it
  * for `npm test`. Use a fixed string so the test is deterministic.
+ *
+ * A static import is safe even though it's hoisted above this hook:
+ * crypto.ts derives (and caches) the key lazily on the first
+ * encrypt/decrypt *call*, not at import time. `before` runs ahead of
+ * any test body, so AUTH_SECRET is in place by the first call.
  */
 before(() => {
   process.env.AUTH_SECRET = "test-secret-for-crypto-tests-32+ chars long";
 });
-
-// Import AFTER the env var is set — the module caches the derived key
-// on first call, so a late env mutation wouldn't take effect.
-const { encryptSecret, decryptSecret, isEncrypted } = await import("@/lib/crypto");
 
 test("encryptSecret produces a different string for the same input each call", () => {
   const a = encryptSecret("hello");
