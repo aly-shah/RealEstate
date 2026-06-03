@@ -28,7 +28,7 @@ npm ci
 
 log "Applying schema (no-op if unchanged)"
 npx prisma generate
-npx prisma db push --skip-generate
+npx prisma db push --skip-generate --accept-data-loss
 
 log "Building Next.js"
 npm run build
