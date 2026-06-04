@@ -12,6 +12,7 @@ import { Timeline } from "@/components/ui/Timeline";
 import { StatusChanger } from "@/components/property/StatusChanger";
 import { PropertyAgentManager } from "@/components/property/PropertyAgentManager";
 import { PropertyGallery } from "@/components/property/PropertyGallery";
+import { ShareProperty } from "@/components/property/ShareProperty";
 import { MapView } from "@/components/map/MapView";
 import { compactMoney, toNumber } from "@/lib/format";
 import { WhatsAppButton } from "@/components/whatsapp/WhatsAppButton";
@@ -180,6 +181,14 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
         </div>
 
         <div className="space-y-6 right-rail">
+          <Section title="Share with client">
+            <ShareProperty
+              propertyId={property.id}
+              enabled={property.shareEnabled}
+              slug={property.shareSlug}
+            />
+          </Section>
+
           {can(user.role, "manageProperties") && (
             <Section title="Change status">
               <StatusChanger id={property.id} current={property.status} />

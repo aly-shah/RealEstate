@@ -1,7 +1,9 @@
 import { auth } from "@/auth";
 import { NextResponse } from "next/server";
 
-const PUBLIC_PATHS = ["/login"];
+// "/p/" (with the trailing slash) is the public client-facing property share
+// page; the slash keeps it from matching /payments, /properties, /profile, etc.
+const PUBLIC_PATHS = ["/login", "/p/"];
 
 export default auth((req) => {
   const { pathname } = req.nextUrl;
@@ -26,7 +28,8 @@ export default auth((req) => {
 
 export const config = {
   // Run on everything except Next internals, NextAuth endpoints, static files,
-  // and the machine-to-machine APIs (jobs cron + external webhooks) which
-  // carry their own bearer/signature auth and must NOT bounce to /login.
-  matcher: ["/((?!api/auth|api/jobs|api/webhooks|_next/static|_next/image|favicon.ico|.*\\..*).*)"],
+  // and the machine-to-machine / public APIs (jobs cron, external webhooks, and
+  // the token-scoped public property-media proxy) which carry their own auth and
+  // must NOT bounce to /login.
+  matcher: ["/((?!api/auth|api/jobs|api/webhooks|api/public|_next/static|_next/image|favicon.ico|.*\\..*).*)"],
 };

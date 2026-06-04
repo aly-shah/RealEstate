@@ -7,11 +7,13 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireCompanyUser } from "@/lib/session";
 import { can } from "@/lib/rbac";
+import { propertyScope } from "@/lib/scope";
 import { logActivity } from "@/lib/activity";
 import { humanize } from "@/lib/format";
 import { nextPropertyReference } from "@/lib/refs";
 import { setFlash } from "@/lib/flash";
 import { canAddProperty } from "@/lib/plans";
+import { newShareSlug } from "@/lib/share";
 
 const propertySchema = z.object({
   title: z.string().min(2, "Title is required"),
@@ -222,6 +224,45 @@ export async function unassignPropertyAgent(formData: FormData): Promise<void> {
     summary: `Removed ${agent?.name ?? "agent"} from ${property.reference}`,
   });
   revalidatePath(`/properties/${propertyId}`);
+}
+
+/**
+ * Turns the public client-facing share link on or off. Anyone who can see the
+ * property (office, or the assigned agent) can share it — scoped via
+ * propertyScope so agents can't toggle a listing that isn't theirs. The slug is
+ * minted once and reused, so toggling off then on again keeps the same URL;
+ * `sharedById` records who shared it (shown to the client as the contact).
+ */
+export async function setPropertyShare(formData: FormData): Promise<void> {
+  const user = await requireCompanyUser();
+  const id = String(formData.get("id"));
+  const enabled = String(formData.get("enabled")) === "true";
+
+  const scope = await propertyScope(user);
+  const property = await prisma.property.findFirst({
+    where: { id, ...scope },
+    select: { id: true, reference: true, shareSlug: true, shareEnabled: true },
+  });
+  if (!property) return;
+  if (property.shareEnabled === enabled && property.shareSlug) return; // no-op
+
+  await prisma.property.update({
+    where: { id },
+    data: {
+      shareEnabled: enabled,
+      shareSlug: property.shareSlug ?? newShareSlug(),
+      sharedById: enabled ? user.id : property.shareEnabled ? undefined : null,
+    },
+  });
+  await logActivity({
+    companyId: user.companyId,
+    userId: user.id,
+    action: enabled ? "property.shared" : "property.unshared",
+    entityType: "PROPERTY",
+    entityId: id,
+    summary: `${enabled ? "Enabled" : "Disabled"} client share link for ${property.reference}`,
+  });
+  revalidatePath(`/properties/${id}`);
 }
 
 export async function updatePropertyStatus(formData: FormData): Promise<void> {

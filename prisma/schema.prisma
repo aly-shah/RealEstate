@@ -548,6 +548,14 @@ model Property {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // Public client-facing share link (served at /p/[shareSlug]). shareSlug is an
+  // unguessable random token, NOT the id, so a client holding one link can't
+  // enumerate other listings. shareEnabled lets the agent revoke access without
+  // losing the URL; sharedById is the agent shown to the client as the contact.
+  shareSlug    String?  @unique
+  shareEnabled Boolean  @default(false)
+  sharedById   String?
+
   media     PropertyMedia[]
   agents    PropertyAgent[]
   leads     Lead[]
