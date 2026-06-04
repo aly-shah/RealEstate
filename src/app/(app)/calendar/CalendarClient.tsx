@@ -1,9 +1,10 @@
 "use client";
 
-import { useActionState, useEffect, useMemo, useState } from "react";
+import { useActionState, useMemo, useState } from "react";
 import { createEvent, setEventStatus, type FormState } from "./actions";
 import { humanize } from "@/lib/format";
 import { Icon } from "@/components/ui/Icon";
+import { Drawer } from "@/components/ui/Drawer";
 
 const TYPES = [
   "SHOWING",
@@ -98,14 +99,6 @@ export function CalendarClient({ events, agents, properties, canAssign }: Calend
     if (!res.error) setFormOpen(false);
     return res;
   }, {});
-
-  // Close the create modal on Escape for a native-app feel.
-  useEffect(() => {
-    if (!formOpen) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setFormOpen(false);
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [formOpen]);
 
   const byDay = useMemo(() => {
     const map = new Map<string, CalEvent[]>();
@@ -301,60 +294,57 @@ export function CalendarClient({ events, agents, properties, canAssign }: Calend
         </aside>
       </div>
 
-      {/* Create modal */}
-      {formOpen && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-4">
-          <div className="absolute inset-0 bg-ink/30 backdrop-blur-sm" onClick={() => setFormOpen(false)} aria-hidden />
-          <div className="surface-soft relative z-10 w-full max-w-lg rounded-b-none rounded-t-2xl p-6 sm:rounded-2xl">
-            <div className="mb-4 flex items-center justify-between">
-              <h3 className="text-base font-semibold text-ink">New event</h3>
-              <button onClick={() => setFormOpen(false)} aria-label="Close" className="btn-ghost h-8 w-8 p-0">✕</button>
-            </div>
-            <form action={action} className="grid gap-4 sm:grid-cols-2">
-              <div className="sm:col-span-2">
-                <label className="label" htmlFor="title">Title</label>
-                <input id="title" name="title" className="field" placeholder="e.g. Site visit with the Khan family" required />
-                {state.fieldErrors?.title && <p className="mt-1 text-xs text-danger">{state.fieldErrors.title[0]}</p>}
-              </div>
-              <div>
-                <label className="label" htmlFor="type">Type</label>
-                <select id="type" name="type" className="field" defaultValue="SHOWING">
-                  {TYPES.map((t) => <option key={t} value={t}>{humanize(t)}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="label" htmlFor="startAt">Start</label>
-                <input id="startAt" name="startAt" type="datetime-local" className="field" defaultValue={`${selectedKey}T09:00`} required />
-              </div>
-              {canAssign && (
-                <div>
-                  <label className="label" htmlFor="agentId">Assign to</label>
-                  <select id="agentId" name="agentId" className="field" defaultValue="">
-                    <option value="">— Me —</option>
-                    {agents.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-                  </select>
-                </div>
-              )}
-              <div>
-                <label className="label" htmlFor="propertyId">Property (optional)</label>
-                <select id="propertyId" name="propertyId" className="field" defaultValue="">
-                  <option value="">— None —</option>
-                  {properties.map((p) => <option key={p.id} value={p.id}>{p.reference} · {p.title}</option>)}
-                </select>
-              </div>
-              <div className="sm:col-span-2">
-                <label className="label" htmlFor="notes">Notes (optional)</label>
-                <textarea id="notes" name="notes" rows={2} className="field" placeholder="Anything the team should know…" />
-              </div>
-              {state.error && <p className="text-xs text-danger sm:col-span-2">{state.error}</p>}
-              <div className="flex gap-2 sm:col-span-2">
-                <button type="submit" disabled={pending} className="btn-primary">{pending ? "Saving…" : "Add to calendar"}</button>
-                <button type="button" onClick={() => setFormOpen(false)} className="btn-ghost">Cancel</button>
-              </div>
-            </form>
+      {/* Create drawer */}
+      <Drawer
+        open={formOpen}
+        onClose={() => setFormOpen(false)}
+        title="New event"
+        description={relativeDayLabel(selectedKey)}
+        width="md"
+      >
+        <form action={action} className="grid gap-4">
+          <div>
+            <label className="label" htmlFor="title">Title</label>
+            <input id="title" name="title" className="field" placeholder="e.g. Site visit with the Khan family" required />
+            {state.fieldErrors?.title && <p className="mt-1 text-xs text-danger">{state.fieldErrors.title[0]}</p>}
           </div>
-        </div>
-      )}
+          <div>
+            <label className="label" htmlFor="type">Type</label>
+            <select id="type" name="type" className="field" defaultValue="SHOWING">
+              {TYPES.map((t) => <option key={t} value={t}>{humanize(t)}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="label" htmlFor="startAt">Start</label>
+            <input id="startAt" name="startAt" type="datetime-local" className="field" defaultValue={`${selectedKey}T09:00`} required />
+          </div>
+          {canAssign && (
+            <div>
+              <label className="label" htmlFor="agentId">Assign to</label>
+              <select id="agentId" name="agentId" className="field" defaultValue="">
+                <option value="">— Me —</option>
+                {agents.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+            </div>
+          )}
+          <div>
+            <label className="label" htmlFor="propertyId">Property (optional)</label>
+            <select id="propertyId" name="propertyId" className="field" defaultValue="">
+              <option value="">— None —</option>
+              {properties.map((p) => <option key={p.id} value={p.id}>{p.reference} · {p.title}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="label" htmlFor="notes">Notes (optional)</label>
+            <textarea id="notes" name="notes" rows={2} className="field" placeholder="Anything the team should know…" />
+          </div>
+          {state.error && <p className="text-xs text-danger">{state.error}</p>}
+          <div className="flex gap-2 pt-1">
+            <button type="submit" disabled={pending} className="btn-primary">{pending ? "Saving…" : "Add to calendar"}</button>
+            <button type="button" onClick={() => setFormOpen(false)} className="btn-ghost">Cancel</button>
+          </div>
+        </form>
+      </Drawer>
     </div>
   );
 }

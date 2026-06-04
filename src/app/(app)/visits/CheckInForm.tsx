@@ -2,6 +2,7 @@
 
 import { useActionState, useState } from "react";
 import { recordShowing, type FormState } from "./actions";
+import { Drawer } from "@/components/ui/Drawer";
 
 interface CheckInFormProps {
   properties: { id: string; title: string; reference: string }[];
@@ -41,11 +42,11 @@ export function CheckInForm({ properties, clients }: CheckInFormProps) {
   return (
     <div>
       <div className="mb-4 flex justify-end">
-        <button onClick={() => setOpen((v) => !v)} className="btn-accent">{open ? "Close" : "⚑ Record a visit"}</button>
+        <button onClick={() => setOpen(true)} className="btn-accent">⚑ Record a visit</button>
       </div>
 
-      {open && (
-        <form action={action} className="surface mb-6 grid gap-4 p-6 sm:grid-cols-2">
+      <Drawer open={open} onClose={() => setOpen(false)} title="Record a visit" width="md">
+        <form action={action} className="space-y-4">
           <input type="hidden" name="lat" value={coords?.lat ?? ""} />
           <input type="hidden" name="lng" value={coords?.lng ?? ""} />
 
@@ -64,7 +65,7 @@ export function CheckInForm({ properties, clients }: CheckInFormProps) {
             </select>
           </div>
 
-          <div className="sm:col-span-2">
+          <div>
             <label className="label">Location</label>
             <div className="flex flex-wrap items-center gap-2">
               <button type="button" onClick={capture} className="btn-ghost text-xs">📍 Use GPS</button>
@@ -83,21 +84,22 @@ export function CheckInForm({ properties, clients }: CheckInFormProps) {
               <option value="NONE">None</option>
             </select>
           </div>
-          <div className="sm:col-span-2">
+          <div>
             <label className="label" htmlFor="clientFeedback">Client feedback</label>
             <textarea id="clientFeedback" name="clientFeedback" rows={2} className="field" placeholder="How did the client react?" />
           </div>
-          <div className="sm:col-span-2">
+          <div>
             <label className="label" htmlFor="notes">Notes</label>
             <textarea id="notes" name="notes" rows={2} className="field" />
           </div>
 
-          {state.error && <p className="sm:col-span-2 rounded-xl border border-danger/30 bg-danger-bg px-3 py-2 text-sm text-danger">{state.error}</p>}
-          <div className="sm:col-span-2">
+          {state.error && <p className="rounded-xl border border-danger/30 bg-danger-bg px-3 py-2 text-sm text-danger">{state.error}</p>}
+          <div className="flex gap-2 pt-1">
             <button type="submit" disabled={pending} className="btn-primary">{pending ? "Saving…" : "Save visit"}</button>
+            <button type="button" onClick={() => setOpen(false)} className="btn-ghost">Cancel</button>
           </div>
         </form>
-      )}
+      </Drawer>
     </div>
   );
 }

@@ -2,6 +2,7 @@
 
 import { useActionState, useState } from "react";
 import { humanize } from "@/lib/format";
+import { Drawer } from "@/components/ui/Drawer";
 import { setDealStatus, generateCommission } from "@/app/(app)/deals/actions";
 import { recordPayment, type FormState } from "@/app/(app)/payments/actions";
 import {
@@ -68,40 +69,42 @@ export function RecordPaymentForm({ dealId, isRental }: { dealId: string; isRent
     return res;
   }, {});
 
-  if (!open) {
-    return <button onClick={() => setOpen(true)} className="btn-ghost w-full text-sm">+ Record payment</button>;
-  }
-
   return (
-    <form action={action} className="space-y-3 rounded-lg border border-line p-3">
-      <input type="hidden" name="dealId" value={dealId} />
-      <div className="grid grid-cols-2 gap-2">
-        <div>
-          <label className="label" htmlFor="type">Type</label>
-          <select id="type" name="type" className="field" defaultValue={isRental ? "RENT" : "INSTALMENT"}>
-            {PAYMENT_TYPES.map((t) => <option key={t} value={t}>{humanize(t)}</option>)}
-          </select>
-        </div>
-        <div>
-          <label className="label" htmlFor="status">Status</label>
-          <select id="status" name="status" className="field" defaultValue="PAID">
-            <option value="PAID">Paid</option>
-            <option value="PENDING">Pending</option>
-            <option value="PARTIAL">Partial</option>
-          </select>
-        </div>
-      </div>
-      <div className="grid grid-cols-2 gap-2">
-        <div><label className="label" htmlFor="amount">Amount</label><input id="amount" name="amount" type="number" min="0" className="field" required /></div>
-        <div><label className="label" htmlFor="dueDate">Due date</label><input id="dueDate" name="dueDate" type="date" className="field" /></div>
-      </div>
-      <input name="receiptNo" className="field" placeholder="Receipt no. (optional)" />
-      {state.error && <p className="text-xs text-danger">{state.error}</p>}
-      <div className="flex gap-2">
-        <button type="submit" disabled={pending} className="btn-primary px-3 py-1.5 text-xs">{pending ? "Saving…" : "Save"}</button>
-        <button type="button" onClick={() => setOpen(false)} className="btn-ghost px-3 py-1.5 text-xs">Cancel</button>
-      </div>
-    </form>
+    <>
+      <button onClick={() => setOpen(true)} className="btn-ghost w-full text-sm">+ Record payment</button>
+
+      <Drawer open={open} onClose={() => setOpen(false)} title="Record payment" width="md">
+        <form action={action} className="space-y-3">
+          <input type="hidden" name="dealId" value={dealId} />
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="label" htmlFor="type">Type</label>
+              <select id="type" name="type" className="field" defaultValue={isRental ? "RENT" : "INSTALMENT"}>
+                {PAYMENT_TYPES.map((t) => <option key={t} value={t}>{humanize(t)}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="label" htmlFor="status">Status</label>
+              <select id="status" name="status" className="field" defaultValue="PAID">
+                <option value="PAID">Paid</option>
+                <option value="PENDING">Pending</option>
+                <option value="PARTIAL">Partial</option>
+              </select>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div><label className="label" htmlFor="amount">Amount</label><input id="amount" name="amount" type="number" min="0" className="field" required /></div>
+            <div><label className="label" htmlFor="dueDate">Due date</label><input id="dueDate" name="dueDate" type="date" className="field" /></div>
+          </div>
+          <input name="receiptNo" className="field" placeholder="Receipt no. (optional)" />
+          {state.error && <p className="text-xs text-danger">{state.error}</p>}
+          <div className="flex gap-2 pt-1">
+            <button type="submit" disabled={pending} className="btn-primary">{pending ? "Saving…" : "Save"}</button>
+            <button type="button" onClick={() => setOpen(false)} className="btn-ghost">Cancel</button>
+          </div>
+        </form>
+      </Drawer>
+    </>
   );
 }
 
@@ -124,64 +127,60 @@ export function CreateInvoiceForm({
     {},
   );
 
-  if (!open) {
-    return (
+  return (
+    <>
       <button onClick={() => setOpen(true)} className="btn-ghost w-full text-sm">
         + Create invoice
       </button>
-    );
-  }
 
-  return (
-    <form action={action} className="space-y-3 rounded-lg border border-line p-3">
-      <input type="hidden" name="dealId" value={dealId} />
-      <input type="hidden" name="redirectTo" value={`/deals/${dealId}`} />
-      <div className="grid grid-cols-2 gap-2">
-        <div>
-          <label className="label" htmlFor={`inv-amount-${dealId}`}>Amount (PKR)</label>
-          <input
-            id={`inv-amount-${dealId}`}
-            name="amount"
-            type="number"
-            min="0"
-            step="1"
-            defaultValue={suggestedAmount > 0 ? suggestedAmount : ""}
-            className="field"
-            required
-          />
-        </div>
-        <div>
-          <label className="label" htmlFor={`inv-due-${dealId}`}>Due date</label>
-          <input id={`inv-due-${dealId}`} name="dueDate" type="date" className="field" />
-        </div>
-      </div>
-      <div>
-        <label className="label" htmlFor={`inv-desc-${dealId}`}>Description (optional)</label>
-        <input
-          id={`inv-desc-${dealId}`}
-          name="description"
-          className="field"
-          placeholder="e.g. Booking instalment 2 of 4"
-          maxLength={500}
-        />
-      </div>
-      <label className="flex items-center gap-2 text-xs text-slate">
-        <input type="checkbox" name="asDraft" value="true" className="accent-ink" />
-        Save as draft (don&apos;t issue yet)
-      </label>
-      {state.error && <p className="text-xs text-danger">{state.error}</p>}
-      <div className="flex gap-2">
-        <button type="submit" disabled={pending} className="btn-primary px-3 py-1.5 text-xs">
-          {pending ? "Saving…" : "Issue invoice"}
-        </button>
-        <button
-          type="button"
-          onClick={() => setOpen(false)}
-          className="btn-ghost px-3 py-1.5 text-xs"
-        >
-          Cancel
-        </button>
-      </div>
-    </form>
+      <Drawer open={open} onClose={() => setOpen(false)} title="Create invoice" width="md">
+        <form action={action} className="space-y-3">
+          <input type="hidden" name="dealId" value={dealId} />
+          <input type="hidden" name="redirectTo" value={`/deals/${dealId}`} />
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="label" htmlFor={`inv-amount-${dealId}`}>Amount (PKR)</label>
+              <input
+                id={`inv-amount-${dealId}`}
+                name="amount"
+                type="number"
+                min="0"
+                step="1"
+                defaultValue={suggestedAmount > 0 ? suggestedAmount : ""}
+                className="field"
+                required
+              />
+            </div>
+            <div>
+              <label className="label" htmlFor={`inv-due-${dealId}`}>Due date</label>
+              <input id={`inv-due-${dealId}`} name="dueDate" type="date" className="field" />
+            </div>
+          </div>
+          <div>
+            <label className="label" htmlFor={`inv-desc-${dealId}`}>Description (optional)</label>
+            <input
+              id={`inv-desc-${dealId}`}
+              name="description"
+              className="field"
+              placeholder="e.g. Booking instalment 2 of 4"
+              maxLength={500}
+            />
+          </div>
+          <label className="flex items-center gap-2 text-xs text-slate">
+            <input type="checkbox" name="asDraft" value="true" className="accent-ink" />
+            Save as draft (don&apos;t issue yet)
+          </label>
+          {state.error && <p className="text-xs text-danger">{state.error}</p>}
+          <div className="flex gap-2 pt-1">
+            <button type="submit" disabled={pending} className="btn-primary">
+              {pending ? "Saving…" : "Issue invoice"}
+            </button>
+            <button type="button" onClick={() => setOpen(false)} className="btn-ghost">
+              Cancel
+            </button>
+          </div>
+        </form>
+      </Drawer>
+    </>
   );
 }

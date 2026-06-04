@@ -31,7 +31,8 @@ export type IconName =
   | "arrow-right"
   | "refresh"
   | "menu"
-  | "message";
+  | "message"
+  | "x";
 
 const PATHS: Record<IconName, React.ReactNode> = {
   dashboard: (
@@ -225,6 +226,12 @@ const PATHS: Record<IconName, React.ReactNode> = {
   message: (
     <>
       <path d="M21 11.5a8.38 8.38 0 0 1-9 8.34 8.5 8.5 0 0 1-3.7-.87L3 21l1.9-5.04A8.5 8.5 0 1 1 21 11.5z" />
+    </>
+  ),
+  x: (
+    <>
+      <path d="M18 6 6 18" />
+      <path d="m6 6 12 12" />
     </>
   ),
 };

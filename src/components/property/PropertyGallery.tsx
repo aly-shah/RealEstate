@@ -3,6 +3,7 @@
 import { useActionState, useState } from "react";
 import { addPropertyMedia, deletePropertyMedia, type FormState } from "@/app/(app)/properties/actions";
 import { Uploader } from "@/components/ui/Uploader";
+import { Drawer } from "@/components/ui/Drawer";
 import { humanize } from "@/lib/format";
 
 export interface MediaItem {
@@ -64,31 +65,29 @@ export function PropertyGallery({
 
       {canManage && (
         <div className="mt-4">
-          {!open ? (
-            <button onClick={() => setOpen(true)} className="btn-ghost text-sm">+ Add media</button>
-          ) : (
-            <form action={action} className="space-y-3 rounded-md border border-line p-4">
+          <button onClick={() => setOpen(true)} className="btn-ghost text-sm">+ Add media</button>
+
+          <Drawer open={open} onClose={() => setOpen(false)} title="Add media" width="md">
+            <form action={action} className="space-y-3">
               <input type="hidden" name="propertyId" value={propertyId} />
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div>
-                  <label className="label" htmlFor="kind">Kind</label>
-                  <select id="kind" name="kind" className="field" defaultValue="PHOTO">
-                    {KINDS.map((k) => <option key={k} value={k}>{humanize(k)}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="label" htmlFor="caption">Caption (optional)</label>
-                  <input id="caption" name="caption" className="field" />
-                </div>
+              <div>
+                <label className="label" htmlFor="kind">Kind</label>
+                <select id="kind" name="kind" className="field" defaultValue="PHOTO">
+                  {KINDS.map((k) => <option key={k} value={k}>{humanize(k)}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="label" htmlFor="caption">Caption (optional)</label>
+                <input id="caption" name="caption" className="field" />
               </div>
               <Uploader name="url" label="Drop a photo, floor plan or brochure" />
               {state.error && <p className="text-xs text-danger">{state.error}</p>}
-              <div className="flex gap-2">
-                <button type="submit" disabled={pending} className="btn-primary px-3 py-1.5 text-xs">{pending ? "Saving…" : "Add to gallery"}</button>
-                <button type="button" onClick={() => setOpen(false)} className="btn-ghost px-3 py-1.5 text-xs">Cancel</button>
+              <div className="flex gap-2 pt-1">
+                <button type="submit" disabled={pending} className="btn-primary">{pending ? "Saving…" : "Add to gallery"}</button>
+                <button type="button" onClick={() => setOpen(false)} className="btn-ghost">Cancel</button>
               </div>
             </form>
-          )}
+          </Drawer>
         </div>
       )}
     </div>
