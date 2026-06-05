@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { money, compactMoney, humanize, fmtDate } from "@/lib/format";
 import { waMeLink, normalizePhone } from "@/lib/whatsapp";
 import { publicMediaUrl } from "@/lib/share";
+import { requestOrigin } from "@/lib/request-meta";
 import { StatusBadge } from "@/components/ui/Badge";
 import { Icon } from "@/components/ui/Icon";
 import { MapView } from "@/components/map/MapView";
@@ -49,18 +50,63 @@ async function getShared(slug: string) {
   });
 }
 
+type Shared = NonNullable<Awaited<ReturnType<typeof getShared>>>;
+
+/** The one headline figure for a listing — sale price, monthly rent, or POR. */
+function priceLineFor(p: Pick<Shared, "salePrice" | "monthlyRent">): string {
+  if (p.salePrice != null) return money(p.salePrice);
+  if (p.monthlyRent != null) return `${money(p.monthlyRent)} / month`;
+  return "Price on request";
+}
+
+/**
+ * The image a social/Open-Graph preview should lead with: the first photo,
+ * else the first floor plan. Returned as the tokenised public proxy path so a
+ * crawler can fetch it without a session. Null when the listing has no imagery.
+ */
+function coverMediaUrl(slug: string, media: Shared["media"]): string | null {
+  const cover = media.find((m) => m.kind === "PHOTO") ?? media.find((m) => m.kind === "FLOOR_PLAN");
+  return cover ? publicMediaUrl(slug, cover.id) : null;
+}
+
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
   const { slug } = await params;
   const p = await getShared(slug);
   // Private share links: never let search engines index a client's listing.
   const robots = { index: false, follow: false };
   if (!p) return { title: "Listing unavailable", robots, description: null };
+
   // Override the platform's default SaaS description with this listing's own.
+  // Lead the preview with the price — it's what makes a pasted WhatsApp/social
+  // link worth tapping.
   const where = [p.area, p.city].filter(Boolean).join(", ");
+  const title = `${p.title} · ${p.company.name}`;
+  const description = [priceLineFor(p), where, p.title].filter(Boolean).join(" — ");
+
+  // og:image / metadataBase need absolute URLs; there's no site-URL env var, so
+  // derive the origin from the request. The cover goes through the public proxy,
+  // which crawlers can fetch without a session.
+  const origin = await requestOrigin();
+  const cover = coverMediaUrl(slug, p.media);
+
   return {
-    title: `${p.title} · ${p.company.name}`,
-    description: [p.title, where].filter(Boolean).join(" — "),
+    title,
+    description,
     robots,
+    ...(origin ? { metadataBase: new URL(origin) } : {}),
+    openGraph: {
+      type: "website",
+      title,
+      description,
+      siteName: p.company.name,
+      ...(cover ? { images: [{ url: cover, alt: p.title }] } : {}),
+    },
+    twitter: {
+      card: cover ? "summary_large_image" : "summary",
+      title,
+      description,
+      ...(cover ? { images: [cover] } : {}),
+    },
   };
 }
 
@@ -97,12 +143,7 @@ export default async function PublicPropertyPage({ params }: { params: Promise<{
 
   const accent = p.company.brandColor || "#4f46e5";
   const location = [p.area, p.city].filter(Boolean).join(", ");
-  const priceLine =
-    p.salePrice != null
-      ? money(p.salePrice)
-      : p.monthlyRent != null
-        ? `${money(p.monthlyRent)} / month`
-        : "Price on request";
+  const priceLine = priceLineFor(p);
 
   // All media goes through the token proxy by id — the raw upload URL is never
   // sent to the client. Photos & floor plans show in the gallery; videos &

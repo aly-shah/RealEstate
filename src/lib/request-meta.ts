@@ -24,6 +24,25 @@ const CONTROL_CHARS_RE = new RegExp(
   "g",
 );
 
+/**
+ * Absolute origin (`https://host`) of the current request, derived from the
+ * proxy-set forwarding headers (nginx sets these; see deploy/setup.sh). Used to
+ * build the fully-qualified URLs that social/Open-Graph crawlers require — there
+ * is no configured site-URL env var. Returns null outside a request context.
+ */
+export async function requestOrigin(): Promise<string | null> {
+  try {
+    const h = await headers();
+    const host = h.get("x-forwarded-host") ?? h.get("host");
+    if (!host) return null;
+    const proto = h.get("x-forwarded-proto") ?? "https";
+    return `${proto}://${host}`;
+  } catch {
+    // headers() throws outside request context (e.g. seed scripts).
+    return null;
+  }
+}
+
 /** Sanitised User-Agent (capped, control characters stripped). */
 export async function userAgent(): Promise<string | null> {
   try {
