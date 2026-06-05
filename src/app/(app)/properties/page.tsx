@@ -13,6 +13,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { Pagination } from "@/components/ui/Pagination";
 import { parsePage } from "@/lib/pagination";
 import { SavedViews } from "@/components/ui/SavedViews";
+import { QuickShareButton } from "@/components/property/QuickShareButton";
 import { PK_CITIES } from "@/lib/pk-areas";
 
 const TYPES = ["RESIDENTIAL", "COMMERCIAL", "PLOT", "APARTMENT", "VILLA", "SHOP", "OFFICE"] as const;
@@ -89,7 +90,7 @@ export default async function PropertiesPage({
         <EmptyState title="No properties found" hint="Try clearing filters, or add your first listing." />
       ) : (
         <>
-          <Table head={["Reference", "Property", "Type", "Price", "Status", "Engagement"]}>
+          <Table head={["Reference", "Property", "Type", "Price", "Status", "Engagement", ""]}>
             {properties.map((p) => (
               <tr key={p.id} className="hover:bg-line-soft">
                 <Td className="font-semibold text-ink">{p.reference}</Td>
@@ -108,6 +109,14 @@ export default async function PropertiesPage({
                 </Td>
                 <Td><StatusBadge status={p.status} /></Td>
                 <Td className="text-xs text-muted">{p._count.leads} leads · {p._count.agents} agents</Td>
+                <Td className="text-end">
+                  <QuickShareButton
+                    propertyId={p.id}
+                    reference={p.reference}
+                    enabled={p.shareEnabled}
+                    slug={p.shareSlug}
+                  />
+                </Td>
               </tr>
             ))}
           </Table>

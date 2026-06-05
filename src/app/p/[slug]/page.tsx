@@ -4,6 +4,7 @@ import { money, compactMoney, humanize, fmtDate } from "@/lib/format";
 import { waMeLink, normalizePhone } from "@/lib/whatsapp";
 import { publicMediaUrl } from "@/lib/share";
 import { StatusBadge } from "@/components/ui/Badge";
+import { Icon } from "@/components/ui/Icon";
 import { MapView } from "@/components/map/MapView";
 import { PublicGallery } from "@/components/property/PublicGallery";
 
@@ -103,11 +104,15 @@ export default async function PublicPropertyPage({ params }: { params: Promise<{
         ? `${money(p.monthlyRent)} / month`
         : "Price on request";
 
-  // Images go through the token proxy by id — the raw upload URL is never sent
-  // to the client. PHOTO + FLOOR_PLAN render in the gallery; other kinds skipped.
+  // All media goes through the token proxy by id — the raw upload URL is never
+  // sent to the client. Photos & floor plans show in the gallery; videos &
+  // brochures (external links or PDFs) show as "open" attachments.
   const images = p.media
     .filter((m) => m.kind === "PHOTO" || m.kind === "FLOOR_PLAN")
     .map((m) => ({ id: m.id, src: publicMediaUrl(slug, m.id), caption: m.caption }));
+  const attachments = p.media
+    .filter((m) => m.kind === "VIDEO" || m.kind === "BROCHURE")
+    .map((m) => ({ id: m.id, kind: m.kind, caption: m.caption, href: publicMediaUrl(slug, m.id) }));
 
   const contactMsg = `Hi, I'm interested in "${p.title}" (${p.reference}).`;
   const wa = agent?.phone ? waMeLink(agent.phone, contactMsg) : null;
@@ -150,6 +155,28 @@ export default async function PublicPropertyPage({ params }: { params: Promise<{
         </div>
 
         {images.length > 0 && <PublicGallery images={images} />}
+
+        {attachments.length > 0 && (
+          <div className="grid gap-2 sm:grid-cols-2">
+            {attachments.map((a) => (
+              <a
+                key={a.id}
+                href={a.href}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="surface flex items-center gap-3 p-3 transition hover:border-accent/40"
+              >
+                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-accent-wash text-accent">
+                  <Icon name={a.kind === "VIDEO" ? "activity" : "document"} className="h-4 w-4" />
+                </span>
+                <span className="min-w-0">
+                  <span className="block truncate text-sm font-medium text-ink">{a.caption || humanize(a.kind)}</span>
+                  <span className="block text-xs text-muted">{a.kind === "VIDEO" ? "Watch video" : "View brochure"}</span>
+                </span>
+              </a>
+            ))}
+          </div>
+        )}
 
         {/* Key specs */}
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">

@@ -262,7 +262,10 @@ export async function setPropertyShare(formData: FormData): Promise<void> {
     entityId: id,
     summary: `${enabled ? "Enabled" : "Disabled"} client share link for ${property.reference}`,
   });
+  // Revalidate both surfaces so the toggle reflects whether sharing was done
+  // from the detail page or the quick-share drawer on the list.
   revalidatePath(`/properties/${id}`);
+  revalidatePath("/properties");
 }
 
 export async function updatePropertyStatus(formData: FormData): Promise<void> {

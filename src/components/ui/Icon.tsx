@@ -32,6 +32,7 @@ export type IconName =
   | "refresh"
   | "menu"
   | "message"
+  | "share"
   | "x";
 
 const PATHS: Record<IconName, React.ReactNode> = {
@@ -232,6 +233,15 @@ const PATHS: Record<IconName, React.ReactNode> = {
     <>
       <path d="M18 6 6 18" />
       <path d="m6 6 12 12" />
+    </>
+  ),
+  share: (
+    <>
+      <circle cx="18" cy="5" r="2.5" />
+      <circle cx="6" cy="12" r="2.5" />
+      <circle cx="18" cy="19" r="2.5" />
+      <path d="m8.2 10.7 7.6-4.4" />
+      <path d="m8.2 13.3 7.6 4.4" />
     </>
   ),
 };
