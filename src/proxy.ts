@@ -1,3 +1,6 @@
+// Next.js Proxy (the file convention formerly called `middleware`): runs on the
+// server before a request is rendered. Here it's the auth gate that bounces
+// anonymous traffic to /login, except for the public paths below.
 import { auth } from "@/auth";
 import { NextResponse } from "next/server";
 
