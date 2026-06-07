@@ -42,8 +42,11 @@ export function FilterBar({
       const next = new URLSearchParams(params.toString());
       if (value) next.set(key, value);
       else next.delete(key);
-      // Filter/search changes invalidate the current page offset.
+      // Filter/search changes invalidate the current page position — drop both
+      // the offset page and any keyset cursor so results start from the top.
       next.delete("page");
+      next.delete("after");
+      next.delete("before");
       router.replace(`${pathname}?${next.toString()}`);
     },
     [params, pathname, router],

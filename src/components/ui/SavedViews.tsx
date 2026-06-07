@@ -47,10 +47,13 @@ export function SavedViews() {
 
   // Strip pagination from the saved query — Page X of an old filter set
   // rarely matters, and dropping it makes "saved view" mean "saved filters".
+  // Covers both offset (page) and keyset (after/before) cursors.
   const currentQuery = (() => {
     const next = new URLSearchParams(params.toString());
     next.delete("page");
     next.delete("pageSize");
+    next.delete("after");
+    next.delete("before");
     return next.toString();
   })();
 

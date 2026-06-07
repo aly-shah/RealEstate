@@ -10,8 +10,8 @@ import { Table, Td } from "@/components/ui/Table";
 import { StatusBadge } from "@/components/ui/Badge";
 import { FilterBar } from "@/components/ui/FilterBar";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { Pagination } from "@/components/ui/Pagination";
-import { parsePage } from "@/lib/pagination";
+import { KeysetPagination } from "@/components/ui/KeysetPagination";
+import { parseKeyset, keysetWhere, keysetOrderBy, sliceKeyset } from "@/lib/pagination";
 import { SavedViews } from "@/components/ui/SavedViews";
 import { scoreLead } from "@/lib/lead-score";
 import { leadHealth } from "@/lib/lead-health";
@@ -23,20 +23,25 @@ const STAGES = ["NEW", "CONTACTED", "INTERESTED", "SITE_VISIT", "PROPERTY_SHOWN"
 export default async function LeadsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; stage?: string; page?: string; pageSize?: string }>;
+  searchParams: Promise<{ q?: string; stage?: string; after?: string; before?: string; pageSize?: string }>;
 }) {
   const user = await requireCompanyUser();
   const sp = await searchParams;
   const scope = leadScope(user);
-  const { page, pageSize, skip } = parsePage(sp);
+  // Keyset (cursor) paging on updatedAt — index-seek at any depth, no OFFSET
+  // scan. Bidirectional via ?after= / ?before=. See lib/pagination.ts.
+  const params = parseKeyset(sp);
 
-  const where: Prisma.LeadWhereInput = {
+  const filtered: Prisma.LeadWhereInput = {
     ...scope,
     ...(sp.stage ? { stage: sp.stage as Prisma.LeadWhereInput["stage"] } : {}),
     ...(sp.q ? { client: { name: { contains: sp.q, mode: "insensitive" } } } : {}),
   };
+  const where: Prisma.LeadWhereInput = {
+    AND: [filtered, keysetWhere(params, "updatedAt") as Prisma.LeadWhereInput],
+  };
 
-  const [leads, total, grouped] = await Promise.all([
+  const [rows, grouped] = await Promise.all([
     prisma.lead.findMany({
       where,
       include: {
@@ -52,13 +57,13 @@ export default async function LeadsPage({
           },
         },
       },
-      orderBy: { updatedAt: "desc" },
-      skip,
-      take: pageSize,
+      orderBy: keysetOrderBy(params, "updatedAt") as Prisma.LeadOrderByWithRelationInput[],
+      take: params.take + 1, // over-fetch one to detect a further page
     }),
-    prisma.lead.count({ where }),
     prisma.lead.groupBy({ by: ["stage"], where: scope, _count: { _all: true } }),
   ]);
+
+  const { items: leads, prevCursor, nextCursor } = sliceKeyset(rows, params, (l) => l.updatedAt);
 
   // Lift the highest non-null interest level seen across showings. HIGH wins
   // over MEDIUM wins over LOW wins over NONE.
@@ -163,7 +168,12 @@ export default async function LeadsPage({
               </tr>
             ))}
           </Table>
-          <Pagination total={total} page={page} pageSize={pageSize} />
+          <KeysetPagination
+            prevCursor={prevCursor}
+            nextCursor={nextCursor}
+            pageSize={params.take}
+            count={leads.length}
+          />
         </>
       )}
     </div>
