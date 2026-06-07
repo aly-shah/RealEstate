@@ -6,6 +6,7 @@ import { requireCompanyUser } from "@/lib/session";
 import { can } from "@/lib/rbac";
 import { logActivity, notify } from "@/lib/activity";
 import { setFlash } from "@/lib/flash";
+import { casUpdateGuarded } from "@/lib/concurrency";
 
 export async function approveCommission(formData: FormData): Promise<void> {
   const user = await requireCompanyUser();
@@ -19,17 +20,26 @@ export async function approveCommission(formData: FormData): Promise<void> {
     include: { deal: true, shares: true },
   });
   if (!commission) return;
-  if (commission.status !== "PENDING_APPROVAL") return; // idempotent
 
-  await prisma.commission.update({
-    where: { id },
-    data: {
+  // Compare-and-swap on the PENDING_APPROVAL state — guards against two
+  // approvers racing on the same commission (both pass a stale read, both
+  // write). Only one update matches; the loser is told it was already handled.
+  const moved = await casUpdateGuarded(
+    prisma.commission,
+    { id, companyId: user.companyId, status: "PENDING_APPROVAL" },
+    {
       status: "APPROVED",
       approvedById: user.id,
       approvedAt: new Date(),
       approvalNote: approvalNote || null,
     },
-  });
+  );
+  if (!moved) {
+    await setFlash({ tone: "ok", message: `Commission for ${commission.deal.reference} was already processed.` });
+    revalidatePath(`/commissions/${id}`);
+    revalidatePath("/commissions");
+    return;
+  }
 
   // Tell each agent their share is approved.
   await Promise.all(

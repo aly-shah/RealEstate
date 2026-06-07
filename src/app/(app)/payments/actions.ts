@@ -9,6 +9,8 @@ import { can } from "@/lib/rbac";
 import { logActivity } from "@/lib/activity";
 import { recomputeInvoiceStatus } from "@/app/(app)/invoices/actions";
 import { setFlash } from "@/lib/flash";
+import { runOnce } from "@/lib/idempotency";
+import { casUpdateGuarded } from "@/lib/concurrency";
 
 const paymentSchema = z.object({
   dealId: z.string().optional(),
@@ -43,20 +45,34 @@ export async function recordPayment(_prev: FormState, formData: FormData): Promi
     if (!dealId && invoice.dealId) dealId = invoice.dealId;
   }
 
-  await prisma.payment.create({
-    data: {
-      companyId: user.companyId,
-      dealId,
-      invoiceId: d.invoiceId || null,
-      type: d.type,
-      amount: new Prisma.Decimal(d.amount),
-      status: d.status,
-      method: d.method || null,
-      receiptNo: d.receiptNo || null,
-      dueDate: d.dueDate ? new Date(d.dueDate) : null,
-      paidAt: d.status === "PAID" ? new Date() : null,
-    },
-  });
+  const paymentData = {
+    companyId: user.companyId,
+    dealId,
+    invoiceId: d.invoiceId || null,
+    type: d.type,
+    amount: new Prisma.Decimal(d.amount),
+    status: d.status,
+    method: d.method || null,
+    receiptNo: d.receiptNo || null,
+    dueDate: d.dueDate ? new Date(d.dueDate) : null,
+    paidAt: d.status === "PAID" ? new Date() : null,
+  };
+
+  // Idempotency: when the form supplies a client-generated key, a double
+  // submit replays the first result instead of recording a second payment.
+  // Forms without the hidden `idempotencyKey` field keep the old behaviour.
+  const idemKey = String(formData.get("idempotencyKey") || "").trim();
+  if (idemKey) {
+    const { replayed } = await runOnce(user.companyId, "payment.create", idemKey, () =>
+      prisma.payment.create({ data: paymentData }),
+    );
+    if (replayed) {
+      revalidatePath("/payments");
+      return { ok: true };
+    }
+  } else {
+    await prisma.payment.create({ data: paymentData });
+  }
 
   await logActivity({
     companyId: user.companyId,
@@ -87,9 +103,20 @@ export async function markPaymentPaid(formData: FormData): Promise<void> {
   const id = String(formData.get("id"));
   const payment = await prisma.payment.findFirst({ where: { id, companyId: user.companyId } });
   if (!payment) return;
-  if (payment.status === "PAID") return;
 
-  await prisma.payment.update({ where: { id }, data: { status: "PAID", paidAt: new Date() } });
+  // Compare-and-swap: only flips a not-yet-PAID row, so two concurrent
+  // "mark paid" clicks can't both pass a stale read and double-process.
+  const moved = await casUpdateGuarded(
+    prisma.payment,
+    { id, companyId: user.companyId, status: { not: "PAID" } },
+    { status: "PAID", paidAt: new Date() },
+  );
+  if (!moved) {
+    await setFlash({ tone: "ok", message: "Payment was already marked paid." });
+    revalidatePath("/payments");
+    return;
+  }
+
   await logActivity({
     companyId: user.companyId,
     userId: user.id,

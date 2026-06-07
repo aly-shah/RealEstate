@@ -394,6 +394,7 @@ model Company {
   notifications   Notification[]
   aiSuggestions   AiSuggestion[]
   whatsappTemplates WhatsAppTemplate[]
+  idempotencyKeys IdempotencyKey[]
 }
 
 model User {
@@ -570,7 +571,8 @@ model Property {
   // The pre-refinement @@index([status]) only served cross-tenant queries
   // the codebase doesn't make; dropped to reduce write overhead.
   @@index([companyId, status])
-  // Speeds map page (`latitude is not null` filter is selective).
+  // Dealer-scoped property lists (the DEALER role's propertyScope filters by
+  // dealerId) + an efficient SetNull when a dealer is deleted.
   @@index([dealerId])
   // Phase 5 added a city filter on /properties — case-insensitive exact match
   // benefits from an index on the raw column (Postgres still seq-scans for
@@ -879,6 +881,9 @@ model Payment {
   type      PaymentType
   amount    Decimal       @db.Decimal(14, 2)
   status    PaymentStatus @default(PENDING)
+  // Optimistic-lock counter (PR4) — bumped on every guarded write so a stale
+  // editor's compare-and-swap matches no rows instead of overwriting newer data.
+  version   Int           @default(0)
   method    String?
   receiptNo String?
   dueDate   DateTime?
@@ -888,9 +893,13 @@ model Payment {
   updatedAt DateTime      @default(now()) @updatedAt
 
   @@index([companyId])
+  // Outstanding-payments aggregates (lib/metrics.ts) filter by companyId +
+  // status (PENDING/PARTIAL/OVERDUE): the count and both money sums hit this
+  // composite instead of scanning every payment in the tenant. Added with the
+  // PR1 rewrite from row-fetch+JS-reduce to SQL aggregate. A bare @@index([status])
+  // is still avoided — it would only serve cross-tenant queries we never make.
+  @@index([companyId, status])
   // Overdue scan: companyId + dueDate (+ status filter applied by query).
-  // The pre-refinement bare @@index([status]) only served cross-tenant
-  // queries the codebase doesn't make; dropped to reduce write cost.
   @@index([companyId, dueDate])
   // Per-deal payment history pulls by dealId; with most deals having ≤10
   // payments, the index keeps the join fast at scale.
@@ -960,6 +969,8 @@ model Commission {
   deal        Deal             @relation(fields: [dealId], references: [id], onDelete: Cascade)
   totalAmount Decimal          @db.Decimal(14, 2)
   status      CommissionStatus @default(DRAFT)
+  // Optimistic-lock counter (PR4). See Payment.version.
+  version     Int              @default(0)
   approvedById String?
   // SetNull: a deleted approver shouldn't drop the historical commission row.
   approvedBy   User?           @relation("CommApprover", fields: [approvedById], references: [id], onDelete: SetNull)
@@ -1238,4 +1249,30 @@ model WhatsAppTemplate {
   // Send UI lists APPROVED templates per tenant.
   @@unique([companyId, name, language])
   @@index([companyId, status])
+}
+
+// Idempotency guard for financial mutations (PR4). A client generates a UUID
+// per user action (e.g. "Record payment" button) and submits it; the server
+// inserts the (companyId, scope, key) row first — a duplicate submit hits the
+// unique constraint and replays the prior result instead of double-writing.
+// Mirrors the Job (type, idempotencyKey) dedup pattern. Purged after 7 days by
+// the purgeOldRows sweep.
+model IdempotencyKey {
+  id        String   @id @default(cuid())
+  companyId String
+  // Cascade so a deleted tenant's keys are cleaned up, matching every other
+  // tenant-scoped model. The @@unique below leads with companyId, so the
+  // cascade delete uses that index — no separate companyId index required.
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  // Operation namespace, e.g. "payment.create", "commission.approve".
+  scope     String
+  // Client-generated UUID, unique per user action.
+  key       String
+  // Id of the row the operation created, so a replay can point at the result.
+  resultId  String?
+  createdAt DateTime @default(now())
+
+  @@unique([companyId, scope, key])
+  // Retention sweep deletes rows older than 7 days.
+  @@index([createdAt])
 }

@@ -78,6 +78,7 @@ export interface PurgeResult {
   jobsDeleted: number;
   notificationsDeleted: number;
   aiSuggestionsDeleted: number;
+  idempotencyKeysDeleted: number;
 }
 
 /**
@@ -104,15 +105,17 @@ export async function purgeOldRows(opts: {
   jobsTtlDays?: number;
   notificationsTtlDays?: number;
   aiSuggestionsTtlDays?: number;
+  idempotencyKeysTtlDays?: number;
 } = {}): Promise<PurgeResult> {
   const {
     jobsTtlDays = 30,
     notificationsTtlDays = 90,
     aiSuggestionsTtlDays = 30,
+    idempotencyKeysTtlDays = 7,
   } = opts;
   const now = Date.now();
 
-  const [jobs, notifs, aiSugs] = await Promise.all([
+  const [jobs, notifs, aiSugs, idemKeys] = await Promise.all([
     prisma.job.deleteMany({
       where: {
         status: "DONE",
@@ -130,11 +133,19 @@ export async function purgeOldRows(opts: {
         createdAt: { lt: new Date(now - aiSuggestionsTtlDays * 86_400_000) },
       },
     }),
+    // Idempotency keys only guard against rapid double-submits; a week is far
+    // longer than any retry window, after which the row is dead weight.
+    prisma.idempotencyKey.deleteMany({
+      where: {
+        createdAt: { lt: new Date(now - idempotencyKeysTtlDays * 86_400_000) },
+      },
+    }),
   ]);
   return {
     jobsDeleted: jobs.count,
     notificationsDeleted: notifs.count,
     aiSuggestionsDeleted: aiSugs.count,
+    idempotencyKeysDeleted: idemKeys.count,
   };
 }
 
