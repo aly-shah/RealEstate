@@ -15,18 +15,29 @@ interface PaymentFormProps {
 
 export function PaymentForm({ deals, invoices = [] }: PaymentFormProps) {
   const [open, setOpen] = useState(false);
+  const [idemKey, setIdemKey] = useState("");
   const [state, action, pending] = useActionState<FormState, FormData>(async (p, fd) => {
     const res = await recordPayment(p, fd);
     if (res.ok) setOpen(false);
     return res;
   }, {});
 
+  // Fresh idempotency key per form opening. It rides along on every submit of
+  // this form, so a double-click or a retried request maps to one payment —
+  // the server's runOnce() replays instead of inserting a second row. A new
+  // key is minted the next time the drawer opens (a genuinely new payment).
+  function openForm() {
+    setIdemKey(crypto.randomUUID());
+    setOpen(true);
+  }
+
   return (
     <div className="mb-4 flex justify-end">
-      <button onClick={() => setOpen(true)} className="btn-accent">+ Record payment</button>
+      <button onClick={openForm} className="btn-accent">+ Record payment</button>
 
       <Drawer open={open} onClose={() => setOpen(false)} title="Record payment" width="md">
         <form action={action} className="space-y-3">
+          <input type="hidden" name="idempotencyKey" value={idemKey} />
           {invoices.length > 0 && (
             <div>
               <label className="label" htmlFor="invoiceId">Apply to invoice (optional)</label>

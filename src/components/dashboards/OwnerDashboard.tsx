@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import {
   agentLeaderboard,
   commissionTotals,
+  companyMetricsTag,
   inventorySnapshot,
   leadsByStage,
   monthlyRevenue,
@@ -10,6 +11,7 @@ import {
   outstandingPayments,
   salesRevenue,
 } from "@/lib/metrics";
+import { cachedQuery } from "@/lib/query-optimizer";
 import { compactMoney, money, initials, localizeDigits } from "@/lib/format";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { StatCard } from "@/components/ui/StatCard";
@@ -23,21 +25,34 @@ import {
 } from "./DashboardCharts";
 
 export async function OwnerDashboard({ companyId }: { companyId: string }) {
-  const [{ locale, dict }, revMonth, revAll, comm, pay, board, inv, pipeline, revTrend, leadStages] =
-    await Promise.all([
-      getDict(),
-      salesRevenue(companyId, monthStart()),
-      salesRevenue(companyId),
-      commissionTotals(companyId),
-      outstandingPayments(companyId),
-      agentLeaderboard(companyId),
-      inventorySnapshot(companyId),
-      prisma.deal.count({
-        where: { companyId, status: { notIn: ["CLOSED_WON", "CLOSED_LOST"] } },
-      }),
-      monthlyRevenue(companyId, 6),
-      leadsByStage(companyId),
-    ]);
+  // Locale stays per-request (reads the cookie); the metric bundle is
+  // company-scoped and locale-independent, so it's cached for 60s under the
+  // tenant's `:metrics` tag. Money mutations (deal close, payment, commission)
+  // call invalidateTags(`co:${companyId}:metrics`) for immediate freshness;
+  // the TTL is the backstop for lead/inventory changes.
+  const { locale, dict } = await getDict();
+  const { revMonth, revAll, comm, pay, board, inv, pipeline, revTrend, leadStages } =
+    await cachedQuery(
+      `co:${companyId}:dash:owner`,
+      { ttlMs: 60_000, tags: [companyMetricsTag(companyId)] },
+      async () => {
+        const [revMonth, revAll, comm, pay, board, inv, pipeline, revTrend, leadStages] =
+          await Promise.all([
+            salesRevenue(companyId, monthStart()),
+            salesRevenue(companyId),
+            commissionTotals(companyId),
+            outstandingPayments(companyId),
+            agentLeaderboard(companyId),
+            inventorySnapshot(companyId),
+            prisma.deal.count({
+              where: { companyId, status: { notIn: ["CLOSED_WON", "CLOSED_LOST"] } },
+            }),
+            monthlyRevenue(companyId, 6),
+            leadsByStage(companyId),
+          ]);
+        return { revMonth, revAll, comm, pay, board, inv, pipeline, revTrend, leadStages };
+      },
+    );
 
   const lastMonthRev = revTrend.length >= 2 ? revTrend[revTrend.length - 2].revenue : 0;
   const delta =

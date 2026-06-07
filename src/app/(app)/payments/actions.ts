@@ -11,6 +11,7 @@ import { recomputeInvoiceStatus } from "@/app/(app)/invoices/actions";
 import { setFlash } from "@/lib/flash";
 import { runOnce } from "@/lib/idempotency";
 import { casUpdateGuarded } from "@/lib/concurrency";
+import { invalidateCompanyMetrics } from "@/lib/metrics";
 
 const paymentSchema = z.object({
   dealId: z.string().optional(),
@@ -90,6 +91,7 @@ export async function recordPayment(_prev: FormState, formData: FormData): Promi
     await recomputeInvoiceStatus(d.invoiceId);
   }
 
+  invalidateCompanyMetrics(user.companyId);
   revalidatePath("/payments");
   if (dealId) revalidatePath(`/deals/${dealId}`);
   if (d.invoiceId) revalidatePath(`/invoices/${d.invoiceId}`);
@@ -129,6 +131,7 @@ export async function markPaymentPaid(formData: FormData): Promise<void> {
 
   if (payment.invoiceId) await recomputeInvoiceStatus(payment.invoiceId);
 
+  invalidateCompanyMetrics(user.companyId);
   await setFlash({ tone: "ok", message: "Payment marked paid." });
   revalidatePath("/payments");
   if (payment.dealId) revalidatePath(`/deals/${payment.dealId}`);

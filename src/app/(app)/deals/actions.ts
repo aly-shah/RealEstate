@@ -9,6 +9,7 @@ import { requireCompanyUser } from "@/lib/session";
 import { can } from "@/lib/rbac";
 import { logActivity, notify } from "@/lib/activity";
 import { computeCommission } from "@/lib/commission";
+import { invalidateCompanyMetrics } from "@/lib/metrics";
 import { toNumber, humanize } from "@/lib/format";
 import { setFlash } from "@/lib/flash";
 import { nextDealReference } from "@/lib/refs";
@@ -160,6 +161,7 @@ export async function setDealStatus(formData: FormData): Promise<void> {
         ? `${deal.reference} closed — property auto-marked ${deal.type === "SALE" ? "SOLD" : "RENTED"}.`
         : `${deal.reference}: ${humanize(String(status))}.`,
   });
+  invalidateCompanyMetrics(user.companyId);
   revalidatePath(`/deals/${id}`);
   revalidatePath("/deals");
 }
@@ -255,6 +257,7 @@ export async function generateCommission(formData: FormData): Promise<void> {
     entityId: deal.id,
     summary: `Commission generated for ${deal.reference}`,
   });
+  invalidateCompanyMetrics(user.companyId);
   revalidatePath(`/deals/${dealId}`);
   revalidatePath("/commissions");
 }

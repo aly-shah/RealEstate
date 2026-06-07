@@ -7,6 +7,7 @@ import { can } from "@/lib/rbac";
 import { logActivity, notify } from "@/lib/activity";
 import { setFlash } from "@/lib/flash";
 import { casUpdateGuarded } from "@/lib/concurrency";
+import { invalidateCompanyMetrics } from "@/lib/metrics";
 
 export async function approveCommission(formData: FormData): Promise<void> {
   const user = await requireCompanyUser();
@@ -67,6 +68,7 @@ export async function approveCommission(formData: FormData): Promise<void> {
       : `Approved commission for ${commission.deal.reference}`,
     meta: { from: commission.status, to: "APPROVED", approvalNote: approvalNote || null },
   });
+  invalidateCompanyMetrics(user.companyId);
   await setFlash({ tone: "ok", message: `Commission for ${commission.deal.reference} approved.` });
   revalidatePath(`/commissions/${id}`);
   revalidatePath("/commissions");
@@ -122,6 +124,7 @@ export async function rejectCommission(formData: FormData): Promise<void> {
     meta: { rejectionReason: reason, totalAmount: Number(commission.totalAmount) },
   });
 
+  invalidateCompanyMetrics(user.companyId);
   revalidatePath(`/deals/${dealId}`);
   revalidatePath("/commissions");
 }
@@ -155,6 +158,7 @@ export async function markSharePaid(formData: FormData): Promise<void> {
     entityId: share.commissionId,
     summary: `Paid share: ${share.label}`,
   });
+  invalidateCompanyMetrics(user.companyId);
   revalidatePath(`/commissions/${share.commissionId}`);
   revalidatePath("/commissions");
 }

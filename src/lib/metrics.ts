@@ -1,9 +1,25 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { invalidateTags } from "@/lib/query-optimizer";
 import { toNumber } from "@/lib/format";
 
 export function monthStart(d = new Date()): Date {
   return new Date(d.getFullYear(), d.getMonth(), 1);
+}
+
+/**
+ * Cache tag for a tenant's dashboard metric bundle (see OwnerDashboard's
+ * cachedQuery). Centralized so the producer and the invalidators can't drift.
+ */
+export const companyMetricsTag = (companyId: string) => `co:${companyId}:metrics`;
+
+/**
+ * Bust the cached dashboard metrics for a tenant. Call from any mutation that
+ * moves money/revenue (deal close, payment, commission) so the owner dashboard
+ * reflects it on the next render instead of waiting out the 60s TTL.
+ */
+export function invalidateCompanyMetrics(companyId: string): void {
+  invalidateTags(companyMetricsTag(companyId));
 }
 
 /** Total sale value of won SALE deals closed since `since`. */
