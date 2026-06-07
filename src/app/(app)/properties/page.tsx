@@ -14,6 +14,7 @@ import { Pagination } from "@/components/ui/Pagination";
 import { parsePage } from "@/lib/pagination";
 import { SavedViews } from "@/components/ui/SavedViews";
 import { QuickShareButton } from "@/components/property/QuickShareButton";
+import { AddPropertyDrawer } from "@/components/property/AddPropertyDrawer";
 import { PK_CITIES } from "@/lib/pk-areas";
 
 const TYPES = ["RESIDENTIAL", "COMMERCIAL", "PLOT", "APARTMENT", "VILLA", "SHOP", "OFFICE"] as const;
@@ -48,7 +49,10 @@ export default async function PropertiesPage({
       : {}),
   };
 
-  const [properties, total] = await Promise.all([
+  // Dealers feed the Add-property drawer's dealer picker (office roles only).
+  const canPickDealer = user.role === "OWNER" || user.role === "ADMIN";
+
+  const [properties, total, dealers] = await Promise.all([
     prisma.property.findMany({
       where,
       include: { dealer: true, _count: { select: { agents: true, leads: true } } },
@@ -57,6 +61,13 @@ export default async function PropertiesPage({
       take: pageSize,
     }),
     prisma.property.count({ where }),
+    canPickDealer
+      ? prisma.dealer.findMany({
+          where: { companyId: user.companyId },
+          select: { id: true, name: true },
+          orderBy: { name: "asc" },
+        })
+      : Promise.resolve([] as { id: string; name: string }[]),
   ]);
 
   return (
@@ -67,7 +78,7 @@ export default async function PropertiesPage({
         subtitle="Every listing the business holds — for sale, for rent, or both."
         action={
           can(user.role, "manageProperties") ? (
-            <Link href="/properties/new" className="btn-accent">+ Add property</Link>
+            <AddPropertyDrawer dealers={dealers} canPickDealer={canPickDealer} />
           ) : null
         }
       />

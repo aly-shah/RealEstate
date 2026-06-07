@@ -3,7 +3,7 @@ import { can } from "@/lib/rbac";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { PropertyForm } from "./PropertyForm";
+import { PropertyForm } from "@/components/property/PropertyForm";
 
 export default async function NewPropertyPage() {
   const user = await requireCompanyUser();
