@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { toNumber } from "@/lib/format";
 
@@ -7,7 +8,10 @@ export function monthStart(d = new Date()): Date {
 
 /** Total sale value of won SALE deals closed since `since`. */
 export async function salesRevenue(companyId: string, since?: Date): Promise<number> {
-  const sales = await prisma.sale.findMany({
+  // Sum in SQL rather than pulling every Sale row into JS — on a large tenant
+  // this transfers one scalar instead of thousands of rows.
+  const agg = await prisma.sale.aggregate({
+    _sum: { salePrice: true },
     where: {
       deal: {
         companyId,
@@ -15,42 +19,57 @@ export async function salesRevenue(companyId: string, since?: Date): Promise<num
         ...(since ? { closeDate: { gte: since } } : {}),
       },
     },
-    select: { salePrice: true },
   });
-  return sales.reduce((sum, s) => sum + toNumber(s.salePrice), 0);
+  return toNumber(agg._sum.salePrice);
 }
 
 /** Commission totals split into paid vs pending across all shares. */
 export async function commissionTotals(companyId: string) {
-  const shares = await prisma.commissionShare.findMany({
+  // groupBy(paid) returns at most two rows (true/false) with the summed amount,
+  // instead of every CommissionShare row.
+  const grouped = await prisma.commissionShare.groupBy({
+    by: ["paid"],
+    _sum: { amount: true },
     where: { commission: { companyId } },
-    select: { amount: true, paid: true },
   });
   let paid = 0;
   let pending = 0;
-  for (const s of shares) {
-    const amt = toNumber(s.amount);
-    if (s.paid) paid += amt;
-    else pending += amt;
+  for (const g of grouped) {
+    const amt = toNumber(g._sum.amount);
+    if (g.paid) paid = amt;
+    else pending = amt;
   }
   return { paid, pending, total: paid + pending };
 }
 
 /** Money still owed to the company: pending/partial/overdue payments. */
 export async function outstandingPayments(companyId: string) {
-  const rows = await prisma.payment.findMany({
-    where: { companyId, status: { in: ["PENDING", "PARTIAL", "OVERDUE"] } },
-    select: { amount: true, status: true, dueDate: true },
-  });
+  // "Overdue" = status OVERDUE, or a PENDING/PARTIAL row whose dueDate has passed.
+  // "Due"     = PENDING/PARTIAL with no due date or one still in the future.
+  // Three SQL aggregates replace fetching the full payment table into JS.
   const now = new Date();
-  let due = 0;
-  let overdue = 0;
-  for (const r of rows) {
-    const amt = toNumber(r.amount);
-    if (r.status === "OVERDUE" || (r.dueDate && r.dueDate < now)) overdue += amt;
-    else due += amt;
-  }
-  return { due, overdue, total: due + overdue, count: rows.length };
+  const overdueWhere: Prisma.PaymentWhereInput = {
+    companyId,
+    OR: [
+      { status: "OVERDUE" },
+      { status: { in: ["PENDING", "PARTIAL"] }, dueDate: { lt: now } },
+    ],
+  };
+  const dueWhere: Prisma.PaymentWhereInput = {
+    companyId,
+    status: { in: ["PENDING", "PARTIAL"] },
+    OR: [{ dueDate: null }, { dueDate: { gte: now } }],
+  };
+
+  const [overdueAgg, dueAgg, total] = await Promise.all([
+    prisma.payment.aggregate({ _sum: { amount: true }, where: overdueWhere }),
+    prisma.payment.aggregate({ _sum: { amount: true }, where: dueWhere }),
+    prisma.payment.count({ where: { companyId, status: { in: ["PENDING", "PARTIAL", "OVERDUE"] } } }),
+  ]);
+
+  const overdue = toNumber(overdueAgg._sum.amount);
+  const due = toNumber(dueAgg._sum.amount);
+  return { due, overdue, total: due + overdue, count: total };
 }
 
 export interface AgentRanking {
