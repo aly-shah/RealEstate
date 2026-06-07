@@ -536,6 +536,10 @@ model Property {
   floors      Int?
   parking     Int?
   yearBuilt   Int?
+  // Curated amenity tags (Parking, Lift, Backup generator, …) chosen from the
+  // chip picker in the Add-property form. Postgres text[]; empty default so
+  // existing rows backfill cleanly and `prisma db push` stays non-destructive.
+  amenities   String[] @default([])
 
   // availability
   availableFrom DateTime?

@@ -15,6 +15,12 @@ import { setFlash } from "@/lib/flash";
 import { canAddProperty } from "@/lib/plans";
 import { newShareSlug } from "@/lib/share";
 
+// Empty form fields arrive as "" — treat those as "not provided" (→ undefined
+// → stored null) rather than coercing to 0, so a blank area/price/count isn't
+// saved as a real 0.
+const optNum = z.preprocess((v) => (v === "" || v == null ? undefined : v), z.coerce.number().nonnegative().optional());
+const optInt = z.preprocess((v) => (v === "" || v == null ? undefined : v), z.coerce.number().int().nonnegative().optional());
+
 const propertySchema = z.object({
   title: z.string().min(2, "Title is required"),
   type: z.enum(["RESIDENTIAL", "COMMERCIAL", "PLOT", "APARTMENT", "VILLA", "SHOP", "OFFICE"]),
@@ -24,16 +30,28 @@ const propertySchema = z.object({
   area: z.string().optional(),
   address: z.string().optional(),
   description: z.string().optional(),
-  salePrice: z.coerce.number().nonnegative().optional(),
-  monthlyRent: z.coerce.number().nonnegative().optional(),
-  deposit: z.coerce.number().nonnegative().optional(),
-  bedrooms: z.coerce.number().int().nonnegative().optional(),
-  bathrooms: z.coerce.number().int().nonnegative().optional(),
-  coveredArea: z.coerce.number().nonnegative().optional(),
+  salePrice: optNum,
+  monthlyRent: optNum,
+  deposit: optNum,
+  coveredArea: optNum,
+  plotSize: optNum,
+  areaUnit: z.enum(["SQFT", "SQM", "SQYD", "MARLA", "KANAL"]).optional(),
+  bedrooms: optInt,
+  bathrooms: optInt,
+  floors: optInt,
+  parking: optInt,
+  yearBuilt: optInt,
   dealerId: z.string().optional(),
   ownerName: z.string().optional(),
   ownerPhone: z.string().optional(),
 });
+
+const AMENITIES = new Set([
+  "Parking", "Lift / Elevator", "Backup Generator", "Security / Guard", "CCTV",
+  "Servant Quarter", "Gym", "Swimming Pool", "Garden / Lawn", "Mosque Nearby",
+  "Furnished", "Gas Connection", "Solar Panels", "Boundary Wall", "Corner",
+  "Park Facing", "Main Road", "Water Boring",
+]);
 
 export type FormState = { error?: string; ok?: boolean; fieldErrors?: Record<string, string[]> };
 
@@ -50,6 +68,18 @@ export async function createProperty(_prev: FormState, formData: FormData): Prom
     return { error: "Please fix the errors below.", fieldErrors: parsed.error.flatten().fieldErrors };
   }
   const d = parsed.data;
+
+  // Amenities arrive as a comma-joined hidden field from the chip picker.
+  // Validate against the known set so a tampered payload can't inject arbitrary
+  // tags, and de-dupe while preserving order.
+  const amenities = [
+    ...new Set(
+      String(formData.get("amenities") || "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => AMENITIES.has(s)),
+    ),
+  ];
 
   // Phase 8: hard-stop at the per-plan property cap before we burn a reference.
   const usage = await canAddProperty(user.companyId);
@@ -71,9 +101,15 @@ export async function createProperty(_prev: FormState, formData: FormData): Prom
     salePrice: num(d.salePrice),
     monthlyRent: num(d.monthlyRent),
     deposit: num(d.deposit),
+    coveredArea: d.coveredArea ?? null,
+    plotSize: d.plotSize ?? null,
+    areaUnit: d.areaUnit ?? "SQFT",
     bedrooms: d.bedrooms ?? null,
     bathrooms: d.bathrooms ?? null,
-    coveredArea: d.coveredArea ?? null,
+    floors: d.floors ?? null,
+    parking: d.parking ?? null,
+    yearBuilt: d.yearBuilt ?? null,
+    amenities,
     dealerId: d.dealerId || null,
     ownerName: d.ownerName || null,
     ownerPhone: d.ownerPhone || null,
