@@ -298,6 +298,9 @@ enum AiSuggestionType {
   LEAD_REPLY_DRAFT
   WHATSAPP_INTENT
   OWNER_WEEKLY_INSIGHT
+  // Add-property form: generate a listing title + description from the
+  // entered attributes (type, area, rooms, amenities …).
+  PROPERTY_COPY
 }
 
 // ─────────────────────────────────────────────────────────── Tenancy & users

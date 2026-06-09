@@ -1,8 +1,8 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useRef, useState } from "react";
 import Link from "next/link";
-import { createProperty, type FormState } from "@/app/(app)/properties/actions";
+import { createProperty, suggestPropertyCopy, type FormState } from "@/app/(app)/properties/actions";
 import { humanize } from "@/lib/format";
 import { CityAreaPicker } from "@/components/ui/CityAreaPicker";
 import { AddressAutocomplete } from "@/components/ui/AddressAutocomplete";
@@ -120,6 +120,12 @@ export function PropertyForm({ dealers, canPickDealer, onCancel }: PropertyFormP
   const [floors, setFloors] = useState(0);
   const [parking, setParking] = useState(0);
   const [amenities, setAmenities] = useState<string[]>([]);
+  // Title + description are controlled so the AI writer can fill them.
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const formRef = useRef<HTMLFormElement>(null);
 
   const showSale = listingType === "SALE" || listingType === "BOTH";
   const showRent = listingType === "RENT" || listingType === "BOTH";
@@ -129,14 +135,53 @@ export function PropertyForm({ dealers, canPickDealer, onCancel }: PropertyFormP
   const toggleAmenity = (a: string) =>
     setAmenities((prev) => (prev.includes(a) ? prev.filter((x) => x !== a) : [...prev, a]));
 
+  // Pull the current field values straight off the form and ask the AI to
+  // draft a title + description, then fill them in.
+  async function writeWithAI() {
+    setAiError(null);
+    setAiBusy(true);
+    try {
+      const fd = new FormData(formRef.current!);
+      const g = (k: string) => ((fd.get(k) as string) || "").trim();
+      const res = await suggestPropertyCopy({
+        type: g("type"), listingType: g("listingType"), city: g("city"), area: g("area"),
+        bedrooms: g("bedrooms"), bathrooms: g("bathrooms"), coveredArea: g("coveredArea"),
+        plotSize: g("plotSize"), areaUnit: g("areaUnit"), salePrice: g("salePrice"),
+        monthlyRent: g("monthlyRent"), amenities: g("amenities"),
+      });
+      if (res.ok) {
+        if (res.title) setTitle(res.title);
+        if (res.description) setDescription(res.description);
+      } else {
+        setAiError(res.error);
+      }
+    } catch {
+      setAiError("Couldn't reach the AI service. Please try again.");
+    } finally {
+      setAiBusy(false);
+    }
+  }
+
   return (
-    <form action={action} className="space-y-6">
+    <form ref={formRef} action={action} className="space-y-6">
       <section>
-        <SectionTitle>Basics</SectionTitle>
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <SectionTitle>Basics</SectionTitle>
+          <button
+            type="button"
+            onClick={writeWithAI}
+            disabled={aiBusy}
+            className="btn-ghost -mt-3 px-2.5 py-1 text-xs"
+            title="Generate a title and description from the details you've entered"
+          >
+            {aiBusy ? "Writing…" : "✨ Write with AI"}
+          </button>
+        </div>
+        {aiError && <p className="mb-3 -mt-1 text-xs text-danger">{aiError}</p>}
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="sm:col-span-2">
             <label className="label" htmlFor="title">Title</label>
-            <input id="title" name="title" className="field" placeholder="e.g. 4-Bed Sea-Facing Apartment" required />
+            <input id="title" name="title" value={title} onChange={(e) => setTitle(e.target.value)} className="field" placeholder="e.g. 4-Bed Sea-Facing Apartment" required />
             <Err state={state} name="title" />
           </div>
           <div className="sm:col-span-2">
@@ -166,7 +211,7 @@ export function PropertyForm({ dealers, canPickDealer, onCancel }: PropertyFormP
           )}
           <div className="sm:col-span-2">
             <label className="label" htmlFor="description">Description</label>
-            <textarea id="description" name="description" rows={3} className="field" placeholder="Highlight the selling points…" />
+            <textarea id="description" name="description" value={description} onChange={(e) => setDescription(e.target.value)} rows={3} className="field" placeholder="Highlight the selling points… or tap ✨ Write with AI" />
           </div>
         </div>
       </section>

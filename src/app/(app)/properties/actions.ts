@@ -14,6 +14,7 @@ import { nextPropertyReference } from "@/lib/refs";
 import { setFlash } from "@/lib/flash";
 import { canAddProperty } from "@/lib/plans";
 import { newShareSlug } from "@/lib/share";
+import { generatePropertyCopy } from "@/lib/ai/handlers/property-copy";
 
 // Empty form fields arrive as "" — treat those as "not provided" (→ undefined
 // → stored null) rather than coercing to 0, so a blank area/price/count isn't
@@ -147,6 +148,53 @@ export async function createProperty(_prev: FormState, formData: FormData): Prom
 
   revalidatePath("/properties");
   redirect(`/properties/${property.id}`);
+}
+
+/**
+ * AI: draft a listing title + description from the attributes already entered
+ * in the Add-property form. Called imperatively from the client (not via a
+ * form action) so it can return the text to populate the fields. Gated by the
+ * tenant's AI plan budget + master switch inside generatePropertyCopy.
+ */
+export async function suggestPropertyCopy(input: {
+  type?: string;
+  listingType?: string;
+  city?: string;
+  area?: string;
+  bedrooms?: string;
+  bathrooms?: string;
+  coveredArea?: string;
+  plotSize?: string;
+  areaUnit?: string;
+  salePrice?: string;
+  monthlyRent?: string;
+  amenities?: string;
+}): Promise<{ ok: true; title: string; description: string } | { ok: false; error: string }> {
+  const user = await requireCompanyUser();
+  if (!can(user.role, "manageProperties")) return { ok: false, error: "Not allowed." };
+
+  const num = (v?: string) => {
+    const n = Number(v);
+    return v && Number.isFinite(n) ? n : null;
+  };
+
+  const res = await generatePropertyCopy({
+    companyId: user.companyId,
+    type: input.type || "APARTMENT",
+    listingType: input.listingType || "SALE",
+    city: input.city || null,
+    area: input.area || null,
+    bedrooms: num(input.bedrooms),
+    bathrooms: num(input.bathrooms),
+    coveredArea: num(input.coveredArea),
+    plotSize: num(input.plotSize),
+    areaUnit: input.areaUnit || null,
+    salePrice: num(input.salePrice),
+    monthlyRent: num(input.monthlyRent),
+    amenities: (input.amenities || "").split(",").map((s) => s.trim()).filter(Boolean),
+  });
+  if (!res.ok) return { ok: false, error: res.reason };
+  return { ok: true, title: res.title, description: res.description };
 }
 
 const mediaSchema = z.object({
