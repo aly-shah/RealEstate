@@ -93,8 +93,17 @@ psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
 npx prisma db push
 ```
 
+Apply the same way for any later index added to a hot table, e.g. the
+Lead agent-filter composite:
+
+```bash
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
+  -f deploy/migrations/2026-06-10-lead-agent-index.sql
+```
+
 Each script is idempotent (`IF [NOT] EXISTS`) so a re-run on a partially
-applied database is safe.
+applied database is safe — and a no-op once `prisma db push` has already
+created the index under the same name.
 
 ## 5. Notes
 
