@@ -23,25 +23,43 @@ const STAGES = ["NEW", "CONTACTED", "INTERESTED", "SITE_VISIT", "PROPERTY_SHOWN"
 export default async function LeadsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; stage?: string; after?: string; before?: string; pageSize?: string }>;
+  searchParams: Promise<{ q?: string; stage?: string; agent?: string; after?: string; before?: string; pageSize?: string }>;
 }) {
   const user = await requireCompanyUser();
   const sp = await searchParams;
   const scope = leadScope(user);
+  // Only roles that work across the whole team get the agent filter — AGENTs are
+  // already locked to their own leads by leadScope, and DEALERs shouldn't see
+  // the agent roster.
+  const canFilterByAgent = can(user.role, "assignLeadsCalendars");
   // Keyset (cursor) paging on updatedAt — index-seek at any depth, no OFFSET
   // scan. Bidirectional via ?after= / ?before=. See lib/pagination.ts.
   const params = parseKeyset(sp);
 
+  // Agent filter: a real agent id narrows to that agent; the "unassigned"
+  // sentinel finds ownerless leads (the ones falling through the cracks).
+  const agentFilter: Prisma.LeadWhereInput = !canFilterByAgent || !sp.agent
+    ? {}
+    : sp.agent === "unassigned"
+      ? { agentId: null }
+      : { agentId: sp.agent };
+  const qFilter: Prisma.LeadWhereInput = sp.q
+    ? { client: { name: { contains: sp.q, mode: "insensitive" } } }
+    : {};
+
+  // Shared by the list AND the pipeline summary so the funnel counts re-scope to
+  // the selected agent / search. Stage is the funnel itself, so it's layered on
+  // for the list query only.
+  const funnelWhere: Prisma.LeadWhereInput = { ...scope, ...agentFilter, ...qFilter };
   const filtered: Prisma.LeadWhereInput = {
-    ...scope,
+    ...funnelWhere,
     ...(sp.stage ? { stage: sp.stage as Prisma.LeadWhereInput["stage"] } : {}),
-    ...(sp.q ? { client: { name: { contains: sp.q, mode: "insensitive" } } } : {}),
   };
   const where: Prisma.LeadWhereInput = {
     AND: [filtered, keysetWhere(params, "updatedAt") as Prisma.LeadWhereInput],
   };
 
-  const [rows, grouped] = await Promise.all([
+  const [rows, grouped, companyAgents] = await Promise.all([
     prisma.lead.findMany({
       where,
       include: {
@@ -60,7 +78,15 @@ export default async function LeadsPage({
       orderBy: keysetOrderBy(params, "updatedAt") as Prisma.LeadOrderByWithRelationInput[],
       take: params.take + 1, // over-fetch one to detect a further page
     }),
-    prisma.lead.groupBy({ by: ["stage"], where: scope, _count: { _all: true } }),
+    prisma.lead.groupBy({ by: ["stage"], where: funnelWhere, _count: { _all: true } }),
+    // Agent picker options (office only).
+    canFilterByAgent
+      ? prisma.user.findMany({
+          where: { companyId: user.companyId, role: "AGENT", status: "ACTIVE" },
+          select: { id: true, name: true },
+          orderBy: { name: "asc" },
+        })
+      : Promise.resolve([] as { id: string; name: string }[]),
   ]);
 
   const { items: leads, prevCursor, nextCursor } = sliceKeyset(rows, params, (l) => l.updatedAt);
@@ -98,6 +124,32 @@ export default async function LeadsPage({
 
   const counts = Object.fromEntries(grouped.map((g) => [g.stage, g._count._all]));
 
+  // Filter controls. Agent dropdown (office only) lists active agents plus an
+  // "Unassigned" bucket.
+  const filters: { key: string; label: string; options: readonly (string | { value: string; label: string })[] }[] = [
+    { key: "stage", label: "Stage", options: STAGES },
+  ];
+  if (canFilterByAgent) {
+    filters.push({
+      key: "agent",
+      label: "Agent",
+      options: [
+        { value: "unassigned", label: "— Unassigned —" },
+        ...companyAgents.map((a) => ({ value: a.id, label: a.name })),
+      ],
+    });
+  }
+
+  // Stage-chip links preserve the active agent + search filters (and reset the
+  // keyset cursor) instead of dropping them.
+  const stageHref = (stage: string) => {
+    const p = new URLSearchParams();
+    if (sp.q) p.set("q", sp.q);
+    if (canFilterByAgent && sp.agent) p.set("agent", sp.agent);
+    p.set("stage", stage);
+    return `/leads?${p.toString()}`;
+  };
+
   return (
     <div>
       <PageHeader
@@ -116,28 +168,34 @@ export default async function LeadsPage({
 
       {/* Pipeline summary */}
       <div className="mb-5 flex gap-1 overflow-x-auto">
-        {STAGES.map((s, i) => (
-          <Link
-            key={s}
-            href={`/leads?stage=${s}`}
-            className={`flex min-w-[110px] flex-1 flex-col gap-1 border px-3 py-2 text-xs transition ${
-              i === 0 ? "rounded-l-lg" : ""
-            } ${i === STAGES.length - 1 ? "rounded-r-lg" : ""} ${
-              s === "CLOSED_WON"
-                ? "border-ink bg-ink"
-                : "border-line bg-white hover:bg-line-soft"
-            }`}
-          >
-            <span className={`font-medium ${s === "CLOSED_WON" ? "text-white/60" : "text-muted"}`}>{humanize(s)}</span>
-            <span className={`text-lg font-semibold ${s === "CLOSED_WON" ? "text-white" : "text-ink"}`}>{counts[s] ?? 0}</span>
-          </Link>
-        ))}
+        {STAGES.map((s, i) => {
+          const active = sp.stage === s;
+          return (
+            <Link
+              key={s}
+              href={stageHref(s)}
+              aria-current={active ? "true" : undefined}
+              className={`flex min-w-[110px] flex-1 flex-col gap-1 border px-3 py-2 text-xs transition ${
+                i === 0 ? "rounded-l-lg" : ""
+              } ${i === STAGES.length - 1 ? "rounded-r-lg" : ""} ${
+                s === "CLOSED_WON"
+                  ? "border-ink bg-ink"
+                  : active
+                    ? "border-accent bg-accent/10 ring-1 ring-accent"
+                    : "border-line bg-white hover:bg-line-soft"
+              }`}
+            >
+              <span className={`font-medium ${s === "CLOSED_WON" ? "text-white/60" : active ? "text-accent" : "text-muted"}`}>{humanize(s)}</span>
+              <span className={`text-lg font-semibold ${s === "CLOSED_WON" ? "text-white" : "text-ink"}`}>{counts[s] ?? 0}</span>
+            </Link>
+          );
+        })}
       </div>
 
       {/* FilterBar already has bottom margin; the SavedViews chip sits inline-right. */}
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="flex-1 min-w-0">
-          <FilterBar searchPlaceholder="Search client…" filters={[{ key: "stage", label: "Stage", options: STAGES }]} />
+          <FilterBar searchPlaceholder="Search client…" filters={filters} />
         </div>
         <div className="mb-4 self-center"><SavedViews /></div>
       </div>

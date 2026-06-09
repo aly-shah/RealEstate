@@ -691,6 +691,10 @@ model Lead {
 
   @@index([companyId])
   @@index([agentId])
+  // Agent-filtered leads list: equality on (companyId, agentId) + ordering by
+  // updatedAt is a single index seek at any keyset depth — also serves the
+  // "unassigned" bucket (agentId IS NULL) the same way.
+  @@index([companyId, agentId, updatedAt])
   // Funnel + recency: every leads-list query orders by updatedAt within scope.
   // The leading `companyId` column also satisfies the rare stage-only filter
   // when combined with the tenant gate — the bare @@index([stage]) it
