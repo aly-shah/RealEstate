@@ -1,23 +1,25 @@
-import { runAi } from "@/lib/ai/run";
-import { tolerantJsonParse } from "@/lib/ai/handlers/whatsapp-classify";
+import { createHash } from "node:crypto";
+import { prisma } from "@/lib/prisma";
+import { AI_BUDGET } from "@/lib/ai/budget";
+import { isOpenAiConfigured, openaiChatJson } from "@/lib/ai/openai";
 
 /**
  * Generate a listing TITLE + DESCRIPTION for the Add-property form from the
  * attributes the agent has entered (type, purpose, area, rooms, size,
- * amenities, price). Routed through runAi so it inherits the per-plan budget
- * gate, the input-hash cache (re-clicking "Write with AI" with the same fields
- * is a free cache hit), and token accounting.
+ * amenities, price). Backed by OpenAI (see lib/ai/openai.ts).
  *
- * Output is a single JSON object `{ title, description }`; we parse it with the
- * tolerant parser shared with the WhatsApp classifier (handles bare JSON,
- * fenced blocks, and prose-wrapped objects).
+ * Self-contained — it does its own provider check, per-plan budget gate
+ * (reusing AI_BUDGET), input-hash cache (re-clicking "Write with AI" with the
+ * same fields is a free cache hit), and AiSuggestion persistence (which is the
+ * budget counter). The Anthropic runAi pipeline and the other AI handlers are
+ * left untouched.
  */
 
 const SYSTEM = `You write listing copy for a Pakistani real-estate brokerage CRM (Proptimizr).
 
 Given a property's attributes, produce an accurate, appealing listing TITLE and DESCRIPTION.
 
-Respond with a SINGLE JSON object and nothing else — no prose, no Markdown, no code fences:
+Respond with a SINGLE JSON object and nothing else:
   { "title": string, "description": string }
 
 Rules:
@@ -47,9 +49,22 @@ export type PropertyCopyResult =
   | { ok: true; title: string; description: string }
   | { ok: false; reason: string };
 
+const TTL_MS = 10 * 60_000;
+
 export async function generatePropertyCopy(input: PropertyCopyInput): Promise<PropertyCopyResult> {
-  // Only include fields that are actually set — empties would pollute both the
-  // prompt and the cache key.
+  // 1. Provider + master switch + plan-includes-AI gate.
+  if (!isOpenAiConfigured()) return { ok: false, reason: "AI features are not configured on this server." };
+  const company = await prisma.company.findUnique({
+    where: { id: input.companyId },
+    select: { plan: true, aiEnabled: true },
+  });
+  if (!company) return { ok: false, reason: "Company not found." };
+  if (!company.aiEnabled) return { ok: false, reason: "AI features are turned off for your workspace." };
+  const limit = AI_BUDGET[company.plan];
+  if (limit <= 0) return { ok: false, reason: "Your plan doesn't include AI features — upgrade to enable them." };
+
+  // 2. Build the attribute map — only fields that are set (empties would
+  //    pollute both the prompt and the cache key).
   const inputs: Record<string, unknown> = { type: input.type, purpose: input.listingType };
   if (input.city) inputs.city = input.city;
   if (input.area) inputs.area = input.area;
@@ -61,23 +76,85 @@ export async function generatePropertyCopy(input: PropertyCopyInput): Promise<Pr
   if (input.monthlyRent != null) inputs.monthlyRentPKR = input.monthlyRent;
   if (input.amenities && input.amenities.length) inputs.amenities = input.amenities.join(", ");
 
-  const res = await runAi({
-    companyId: input.companyId,
-    type: "PROPERTY_COPY",
-    // No persisted property yet — key the cache on the company; the input hash
-    // differentiates distinct attribute sets within it.
-    entity: { type: "PROPERTY_DRAFT", id: input.companyId },
+  const inputHash = createHash("sha256")
+    .update(JSON.stringify({ s: SYSTEM, i: inputs }))
+    .digest("hex");
+
+  // 3. Cache: identical attributes within the freshness window reuse the row
+  //    (no re-call, no budget burn).
+  const cached = await prisma.aiSuggestion.findFirst({
+    where: {
+      companyId: input.companyId,
+      type: "PROPERTY_COPY",
+      entityType: "PROPERTY_DRAFT",
+      entityId: input.companyId,
+      inputHash,
+      createdAt: { gte: new Date(Date.now() - TTL_MS) },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+  if (cached) return parseCopy(cached.content);
+
+  // 4. Monthly budget check (cache hits above don't count).
+  if (Number.isFinite(limit)) {
+    const monthStart = new Date();
+    monthStart.setDate(1);
+    monthStart.setHours(0, 0, 0, 0);
+    const used = await prisma.aiSuggestion.count({
+      where: { companyId: input.companyId, createdAt: { gte: monthStart } },
+    });
+    if (used >= limit) {
+      return { ok: false, reason: `Monthly AI limit reached (${used}/${limit}). It resets on the 1st.` };
+    }
+  }
+
+  // 5. Call OpenAI.
+  const context = Object.entries(inputs)
+    .map(([k, v]) => `${k}: ${typeof v === "string" ? v : JSON.stringify(v)}`)
+    .join("\n");
+  const res = await openaiChatJson({
     system: SYSTEM,
-    prompt: "Write a listing title and description for this property. Return JSON {title, description} only.",
-    inputs,
+    user: `Write a listing title and description for this property. Return JSON {title, description} only.\n\n<context>\n${context}\n</context>`,
     maxTokens: 500,
-    cacheTtlMs: 10 * 60_000,
   });
   if (!res.ok) return res;
 
-  const parsed = tolerantJsonParse(res.content) as { title?: unknown; description?: unknown } | null;
-  const title = parsed && typeof parsed.title === "string" ? parsed.title.trim().slice(0, 120) : "";
-  const description = parsed && typeof parsed.description === "string" ? parsed.description.trim().slice(0, 1200) : "";
+  // 6. Persist (caches + counts toward the monthly budget).
+  const content = res.text.length > 4_000 ? res.text.slice(0, 4_000) : res.text;
+  await prisma.aiSuggestion.create({
+    data: {
+      companyId: input.companyId,
+      type: "PROPERTY_COPY",
+      entityType: "PROPERTY_DRAFT",
+      entityId: input.companyId,
+      content,
+      inputHash,
+      promptTokens: res.usage.promptTokens,
+      completionTokens: res.usage.completionTokens,
+      cachedTokens: 0,
+    },
+  });
+
+  return parseCopy(content);
+}
+
+/** Parse the model's JSON reply into a clamped {title, description}. */
+function parseCopy(raw: string): PropertyCopyResult {
+  let obj: { title?: unknown; description?: unknown } | null = null;
+  try {
+    obj = JSON.parse(raw);
+  } catch {
+    const m = raw.match(/\{[\s\S]*\}/);
+    if (m) {
+      try {
+        obj = JSON.parse(m[0]);
+      } catch {
+        /* fall through */
+      }
+    }
+  }
+  const title = obj && typeof obj.title === "string" ? obj.title.trim().slice(0, 120) : "";
+  const description = obj && typeof obj.description === "string" ? obj.description.trim().slice(0, 1200) : "";
   if (!title && !description) return { ok: false, reason: "AI returned an unexpected response — please try again." };
   return { ok: true, title, description };
 }
