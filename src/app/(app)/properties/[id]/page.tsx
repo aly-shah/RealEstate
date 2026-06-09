@@ -13,6 +13,7 @@ import { StatusChanger } from "@/components/property/StatusChanger";
 import { PropertyAgentManager } from "@/components/property/PropertyAgentManager";
 import { PropertyGallery } from "@/components/property/PropertyGallery";
 import { ShareProperty } from "@/components/property/ShareProperty";
+import { EditPropertyDrawer } from "@/components/property/EditPropertyDrawer";
 import { MapView } from "@/components/map/MapView";
 import { compactMoney, toNumber } from "@/lib/format";
 import { WhatsAppButton } from "@/components/whatsapp/WhatsAppButton";
@@ -48,8 +49,11 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
   if (!property) notFound();
 
   const isOffice = user.role === "OWNER" || user.role === "ADMIN";
+  // Who may edit the listing's core fields (and pick a dealer for it).
+  const canManage = can(user.role, "manageProperties");
+  const canPickDealer = isOffice;
 
-  const [activity, companyAgents, company] = await Promise.all([
+  const [activity, companyAgents, company, dealers] = await Promise.all([
     prisma.activityLog.findMany({
       where: { companyId: user.companyId, entityType: "PROPERTY", entityId: id },
       include: { user: true },
@@ -68,7 +72,46 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
       where: { id: user.companyId },
       select: { name: true, whatsappSignature: true },
     }),
+    // Dealers feed the edit drawer's dealer picker (office roles only).
+    canPickDealer
+      ? prisma.dealer.findMany({
+          where: { companyId: user.companyId },
+          select: { id: true, name: true },
+          orderBy: { name: "asc" },
+        })
+      : Promise.resolve([]),
   ]);
+
+  // Snapshot of the current values for the edit form (Decimals → numbers).
+  const editInitial = {
+    id: property.id,
+    version: property.version,
+    title: property.title,
+    description: property.description,
+    type: property.type,
+    listingType: property.listingType,
+    status: property.status,
+    city: property.city,
+    area: property.area,
+    address: property.address,
+    latitude: property.latitude,
+    longitude: property.longitude,
+    salePrice: property.salePrice ? toNumber(property.salePrice) : null,
+    monthlyRent: property.monthlyRent ? toNumber(property.monthlyRent) : null,
+    deposit: property.deposit ? toNumber(property.deposit) : null,
+    coveredArea: property.coveredArea,
+    plotSize: property.plotSize,
+    areaUnit: property.areaUnit,
+    bedrooms: property.bedrooms,
+    bathrooms: property.bathrooms,
+    floors: property.floors,
+    parking: property.parking,
+    yearBuilt: property.yearBuilt,
+    amenities: property.amenities,
+    dealerId: property.dealerId,
+    ownerName: property.ownerName,
+    ownerPhone: property.ownerPhone,
+  };
 
   // Pre-build the propertyDetails template once — both supplier buttons share it.
   const propertyMessage = TEMPLATES.propertyDetails({
@@ -91,7 +134,14 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
         eyebrow={property.reference}
         title={property.title}
         subtitle={[property.area, property.city].filter(Boolean).join(", ") || undefined}
-        action={<StatusBadge status={property.status} />}
+        action={
+          <div className="flex items-center gap-2">
+            <StatusBadge status={property.status} />
+            {canManage && (
+              <EditPropertyDrawer property={editInitial} dealers={dealers} canPickDealer={canPickDealer} />
+            )}
+          </div>
+        }
       />
 
       <div className="grid gap-6 lg:grid-cols-3">

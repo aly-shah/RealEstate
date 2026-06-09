@@ -14,6 +14,7 @@ import { nextPropertyReference } from "@/lib/refs";
 import { setFlash } from "@/lib/flash";
 import { canAddProperty } from "@/lib/plans";
 import { newShareSlug } from "@/lib/share";
+import { casUpdateGuarded } from "@/lib/concurrency";
 import { generatePropertyCopy } from "@/lib/ai/handlers/property-copy";
 
 // Empty form fields arrive as "" — treat those as "not provided" (→ undefined
@@ -148,6 +149,100 @@ export async function createProperty(_prev: FormState, formData: FormData): Prom
 
   revalidatePath("/properties");
   redirect(`/properties/${property.id}`);
+}
+
+/**
+ * Edit an existing property's core fields. Mirrors createProperty's validation
+ * and field mapping, but:
+ *   - authorises through propertyScope (an AGENT can only edit a listing that's
+ *     assigned to them; office sees the whole tenant),
+ *   - uses an optimistic lock (the form round-trips `version`; casUpdateGuarded
+ *     only writes when it still matches), so two people editing the same listing
+ *     can't silently clobber each other,
+ *   - never touches reference, companyId, agent assignments or share settings.
+ * Returns { ok } so the drawer can close itself; no redirect (we're already on
+ * the property page and revalidatePath refreshes it in place).
+ */
+export async function updateProperty(_prev: FormState, formData: FormData): Promise<FormState> {
+  const user = await requireCompanyUser();
+  if (!can(user.role, "manageProperties")) return { error: "Not allowed." };
+
+  const id = String(formData.get("id") || "");
+  if (!id) return { error: "Missing property." };
+  const expectedVersion = Number(formData.get("version") || 0);
+
+  const parsed = propertySchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) {
+    return { error: "Please fix the errors below.", fieldErrors: parsed.error.flatten().fieldErrors };
+  }
+  const d = parsed.data;
+
+  // Authorise: the property must be visible in this user's scope (tenant +
+  // role). We fetch under scope first so an agent can't edit a listing that
+  // isn't theirs even if they guess the id.
+  const scope = await propertyScope(user);
+  const existing = await prisma.property.findFirst({ where: { id, ...scope }, select: { id: true, reference: true } });
+  if (!existing) return { error: "Property not found." };
+
+  const amenities = [
+    ...new Set(
+      String(formData.get("amenities") || "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => AMENITIES.has(s)),
+    ),
+  ];
+
+  const data = {
+    title: d.title,
+    type: d.type,
+    listingType: d.listingType,
+    status: d.status,
+    city: d.city || null,
+    area: d.area || null,
+    address: d.address || null,
+    latitude: d.latitude ?? null,
+    longitude: d.longitude ?? null,
+    description: d.description || null,
+    salePrice: num(d.salePrice),
+    monthlyRent: num(d.monthlyRent),
+    deposit: num(d.deposit),
+    coveredArea: d.coveredArea ?? null,
+    plotSize: d.plotSize ?? null,
+    areaUnit: d.areaUnit ?? "SQFT",
+    bedrooms: d.bedrooms ?? null,
+    bathrooms: d.bathrooms ?? null,
+    floors: d.floors ?? null,
+    parking: d.parking ?? null,
+    yearBuilt: d.yearBuilt ?? null,
+    amenities,
+    dealerId: d.dealerId || null,
+    ownerName: d.ownerName || null,
+    ownerPhone: d.ownerPhone || null,
+  };
+
+  // Optimistic lock: pin id + tenant + the version the form was loaded with.
+  // casUpdateGuarded bumps version on success and returns false if nothing
+  // matched (someone saved first).
+  const moved = await casUpdateGuarded(
+    prisma.property,
+    { id, companyId: user.companyId, version: expectedVersion },
+    data,
+  );
+  if (!moved) return { error: "This property changed since you opened it. Reload and try again." };
+
+  await logActivity({
+    companyId: user.companyId,
+    userId: user.id,
+    action: "property.updated",
+    entityType: "PROPERTY",
+    entityId: id,
+    summary: `Updated property ${existing.reference} — ${d.title}`,
+  });
+
+  revalidatePath(`/properties/${id}`);
+  revalidatePath("/properties");
+  return { ok: true };
 }
 
 /**

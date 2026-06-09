@@ -1,8 +1,8 @@
 "use client";
 
-import { useActionState, useRef, useState } from "react";
+import { useActionState, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { createProperty, suggestPropertyCopy, type FormState } from "@/app/(app)/properties/actions";
+import { createProperty, updateProperty, suggestPropertyCopy, type FormState } from "@/app/(app)/properties/actions";
 import { humanize } from "@/lib/format";
 import { CityAreaPicker } from "@/components/ui/CityAreaPicker";
 import { AddressAutocomplete } from "@/components/ui/AddressAutocomplete";
@@ -31,12 +31,47 @@ const AMENITIES = [
   "Park Facing", "Main Road", "Water Boring",
 ];
 
+/** Initial values for edit mode — what the property page already has on record.
+ *  All optional/nullable so a partly-filled listing maps cleanly to the form. */
+export interface PropertyInitial {
+  id: string;
+  version: number;
+  title: string;
+  description?: string | null;
+  type: string;
+  listingType: string;
+  status: string;
+  city?: string | null;
+  area?: string | null;
+  address?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  salePrice?: number | null;
+  monthlyRent?: number | null;
+  deposit?: number | null;
+  coveredArea?: number | null;
+  plotSize?: number | null;
+  areaUnit?: string | null;
+  bedrooms?: number | null;
+  bathrooms?: number | null;
+  floors?: number | null;
+  parking?: number | null;
+  yearBuilt?: number | null;
+  amenities?: string[];
+  dealerId?: string | null;
+  ownerName?: string | null;
+  ownerPhone?: string | null;
+}
+
 interface PropertyFormProps {
   dealers: { id: string; name: string }[];
   canPickDealer: boolean;
   /** When provided (drawer context), Cancel closes the drawer instead of
    *  navigating to /properties. */
   onCancel?: () => void;
+  /** When provided, the form runs in EDIT mode: fields are pre-filled and
+   *  submitting calls updateProperty (optimistic-locked) instead of create. */
+  property?: PropertyInitial;
 }
 
 function Err({ state, name }: { state: FormState; name: string }) {
@@ -102,30 +137,45 @@ function Stepper({
 }
 
 /**
- * Create-property form — detailed + interactive, and dynamic so only the fields
- * that fit the chosen Purpose/Type are shown.
+ * Property form — detailed + interactive, and dynamic so only the fields that
+ * fit the chosen Purpose/Type are shown.
  *   - Purpose (segmented): SALE shows sale price; RENT shows rent + deposit.
  *   - Type: residential shows bedrooms; PLOT (land) drops covered area, rooms,
  *     baths, floors, parking and year built — a plot has none of them.
  * Hidden fields aren't submitted, so the server stores null (no stale values).
+ *
+ * Two modes, same component:
+ *   - CREATE (no `property`): blank, submits createProperty, redirects to the
+ *     new listing.
+ *   - EDIT (`property` given): pre-filled, submits updateProperty with the
+ *     property id + optimistic-lock version, then closes the drawer on success.
  * Works inline (/properties/new) and inside the right-sliding Drawer (onCancel).
  */
-export function PropertyForm({ dealers, canPickDealer, onCancel }: PropertyFormProps) {
-  const [state, action, pending] = useActionState<FormState, FormData>(createProperty, {});
-  const [listingType, setListingType] = useState("SALE");
-  const [type, setType] = useState("APARTMENT");
-  const [areaUnit, setAreaUnit] = useState("SQFT");
-  const [bedrooms, setBedrooms] = useState(0);
-  const [bathrooms, setBathrooms] = useState(0);
-  const [floors, setFloors] = useState(0);
-  const [parking, setParking] = useState(0);
-  const [amenities, setAmenities] = useState<string[]>([]);
+export function PropertyForm({ dealers, canPickDealer, onCancel, property }: PropertyFormProps) {
+  const isEdit = !!property;
+  const [state, action, pending] = useActionState<FormState, FormData>(
+    isEdit ? updateProperty : createProperty,
+    {},
+  );
+  const [listingType, setListingType] = useState(property?.listingType ?? "SALE");
+  const [type, setType] = useState(property?.type ?? "APARTMENT");
+  const [areaUnit, setAreaUnit] = useState(property?.areaUnit ?? "SQFT");
+  const [bedrooms, setBedrooms] = useState(property?.bedrooms ?? 0);
+  const [bathrooms, setBathrooms] = useState(property?.bathrooms ?? 0);
+  const [floors, setFloors] = useState(property?.floors ?? 0);
+  const [parking, setParking] = useState(property?.parking ?? 0);
+  const [amenities, setAmenities] = useState<string[]>(property?.amenities ?? []);
   // Title + description are controlled so the AI writer can fill them.
-  const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
+  const [title, setTitle] = useState(property?.title ?? "");
+  const [description, setDescription] = useState(property?.description ?? "");
   const [aiBusy, setAiBusy] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
+
+  // Edit mode returns { ok } (no redirect) — close the drawer when it lands.
+  useEffect(() => {
+    if (state.ok) onCancel?.();
+  }, [state.ok, onCancel]);
 
   const showSale = listingType === "SALE" || listingType === "BOTH";
   const showRent = listingType === "RENT" || listingType === "BOTH";
@@ -164,6 +214,12 @@ export function PropertyForm({ dealers, canPickDealer, onCancel }: PropertyFormP
 
   return (
     <form ref={formRef} action={action} className="space-y-6">
+      {isEdit && (
+        <>
+          <input type="hidden" name="id" value={property!.id} />
+          <input type="hidden" name="version" value={property!.version} />
+        </>
+      )}
       <section>
         <div className="mb-3 flex items-center justify-between gap-2">
           <SectionTitle>Basics</SectionTitle>
@@ -196,14 +252,14 @@ export function PropertyForm({ dealers, canPickDealer, onCancel }: PropertyFormP
           </div>
           <div>
             <label className="label" htmlFor="status">Status</label>
-            <select id="status" name="status" className="field" defaultValue="AVAILABLE">
+            <select id="status" name="status" className="field" defaultValue={property?.status ?? "AVAILABLE"}>
               {STATUSES.map((t) => <option key={t} value={t}>{humanize(t)}</option>)}
             </select>
           </div>
           {canPickDealer && (
             <div className="sm:col-span-2">
               <label className="label" htmlFor="dealerId">Dealer (optional)</label>
-              <select id="dealerId" name="dealerId" className="field" defaultValue="">
+              <select id="dealerId" name="dealerId" className="field" defaultValue={property?.dealerId ?? ""}>
                 <option value="">— Private owner —</option>
                 {dealers.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
               </select>
@@ -219,16 +275,16 @@ export function PropertyForm({ dealers, canPickDealer, onCancel }: PropertyFormP
       <section className="border-t border-line pt-5">
         <SectionTitle>Location &amp; pricing</SectionTitle>
         <div className="space-y-4">
-          <CityAreaPicker cityName="city" areaName="area" />
+          <CityAreaPicker cityName="city" areaName="area" defaultCity={property?.city} defaultArea={property?.area} />
           <div>
             <label className="label" htmlFor="address">Address</label>
-            <AddressAutocomplete name="address" latName="latitude" lonName="longitude" />
+            <AddressAutocomplete name="address" latName="latitude" lonName="longitude" defaultValue={property?.address ?? ""} defaultLat={property?.latitude} defaultLon={property?.longitude} />
           </div>
           {(showSale || showRent) && (
             <div className="grid gap-4 sm:grid-cols-2">
-              {showSale && <div><label className="label" htmlFor="salePrice">Sale price (PKR)</label><input id="salePrice" name="salePrice" type="number" min="0" className="field" /></div>}
-              {showRent && <div><label className="label" htmlFor="monthlyRent">Monthly rent (PKR)</label><input id="monthlyRent" name="monthlyRent" type="number" min="0" className="field" /></div>}
-              {showRent && <div><label className="label" htmlFor="deposit">Security deposit (PKR)</label><input id="deposit" name="deposit" type="number" min="0" className="field" /></div>}
+              {showSale && <div><label className="label" htmlFor="salePrice">Sale price (PKR)</label><input id="salePrice" name="salePrice" type="number" min="0" className="field" defaultValue={property?.salePrice ?? ""} /></div>}
+              {showRent && <div><label className="label" htmlFor="monthlyRent">Monthly rent (PKR)</label><input id="monthlyRent" name="monthlyRent" type="number" min="0" className="field" defaultValue={property?.monthlyRent ?? ""} /></div>}
+              {showRent && <div><label className="label" htmlFor="deposit">Security deposit (PKR)</label><input id="deposit" name="deposit" type="number" min="0" className="field" defaultValue={property?.deposit ?? ""} /></div>}
             </div>
           )}
         </div>
@@ -244,10 +300,10 @@ export function PropertyForm({ dealers, canPickDealer, onCancel }: PropertyFormP
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
               <label className="label" htmlFor="plotSize">Total area ({UNIT_OPTS.find((u) => u.value === areaUnit)?.label})</label>
-              <input id="plotSize" name="plotSize" type="number" min="0" step="any" className="field" placeholder="e.g. 10" />
+              <input id="plotSize" name="plotSize" type="number" min="0" step="any" className="field" placeholder="e.g. 10" defaultValue={property?.plotSize ?? ""} />
             </div>
             {!isLand && (
-              <div><label className="label" htmlFor="coveredArea">Covered area (sq.ft)</label><input id="coveredArea" name="coveredArea" type="number" min="0" className="field" placeholder="e.g. 1800" /></div>
+              <div><label className="label" htmlFor="coveredArea">Covered area (sq.ft)</label><input id="coveredArea" name="coveredArea" type="number" min="0" className="field" placeholder="e.g. 1800" defaultValue={property?.coveredArea ?? ""} /></div>
             )}
           </div>
           {!isLand && (
@@ -259,7 +315,7 @@ export function PropertyForm({ dealers, canPickDealer, onCancel }: PropertyFormP
             </div>
           )}
           {!isLand && (
-            <div className="sm:max-w-[220px]"><label className="label" htmlFor="yearBuilt">Year built</label><input id="yearBuilt" name="yearBuilt" type="number" min="1900" max="2100" className="field" placeholder="e.g. 2021" /></div>
+            <div className="sm:max-w-[220px]"><label className="label" htmlFor="yearBuilt">Year built</label><input id="yearBuilt" name="yearBuilt" type="number" min="1900" max="2100" className="field" placeholder="e.g. 2021" defaultValue={property?.yearBuilt ?? ""} /></div>
           )}
         </div>
       </section>
@@ -291,8 +347,8 @@ export function PropertyForm({ dealers, canPickDealer, onCancel }: PropertyFormP
       <section className="border-t border-line pt-5">
         <SectionTitle>Owner</SectionTitle>
         <div className="grid gap-4 sm:grid-cols-2">
-          <div><label className="label" htmlFor="ownerName">Owner name</label><input id="ownerName" name="ownerName" className="field" /></div>
-          <div><label className="label" htmlFor="ownerPhone">Owner phone</label><input id="ownerPhone" name="ownerPhone" className="field" placeholder="03xx-xxxxxxx" /></div>
+          <div><label className="label" htmlFor="ownerName">Owner name</label><input id="ownerName" name="ownerName" className="field" defaultValue={property?.ownerName ?? ""} /></div>
+          <div><label className="label" htmlFor="ownerPhone">Owner phone</label><input id="ownerPhone" name="ownerPhone" className="field" placeholder="03xx-xxxxxxx" defaultValue={property?.ownerPhone ?? ""} /></div>
         </div>
       </section>
 
@@ -301,7 +357,7 @@ export function PropertyForm({ dealers, canPickDealer, onCancel }: PropertyFormP
       <div className={onCancel
         ? "sticky bottom-0 -mx-5 -mb-5 flex gap-2 border-t border-line bg-paper px-5 py-3"
         : "flex gap-2 pt-2"}>
-        <button type="submit" disabled={pending} className="btn-accent">{pending ? "Saving…" : "Save property"}</button>
+        <button type="submit" disabled={pending} className="btn-accent">{pending ? "Saving…" : isEdit ? "Save changes" : "Save property"}</button>
         {onCancel ? (
           <button type="button" onClick={onCancel} className="btn-ghost">Cancel</button>
         ) : (

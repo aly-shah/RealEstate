@@ -15,6 +15,9 @@ interface AddressAutocompleteProps {
   latName?: string;
   lonName?: string;
   defaultValue?: string;
+  /** Pre-captured coordinates (edit mode) — preserved until the user retypes. */
+  defaultLat?: number | null;
+  defaultLon?: number | null;
   placeholder?: string;
 }
 
@@ -47,13 +50,17 @@ export function AddressAutocomplete({
   latName = "latitude",
   lonName = "longitude",
   defaultValue = "",
+  defaultLat = null,
+  defaultLon = null,
   placeholder = "Start typing an address…",
 }: AddressAutocompleteProps) {
   const [value, setValue] = useState(defaultValue);
   const [items, setItems] = useState<Suggestion[]>([]);
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(-1);
-  const [coords, setCoords] = useState<{ lat: number; lon: number } | null>(null);
+  const [coords, setCoords] = useState<{ lat: number; lon: number } | null>(
+    defaultLat != null && defaultLon != null ? { lat: defaultLat, lon: defaultLon } : null,
+  );
   const [loading, setLoading] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const listId = useId();

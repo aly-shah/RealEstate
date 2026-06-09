@@ -556,6 +556,12 @@ model Property {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // Optimistic-lock counter. The edit form round-trips this; casUpdateGuarded
+  // only writes when it still matches, then bumps it — so two agents editing
+  // the same listing can't silently clobber each other. @default(0) backfills
+  // existing rows cleanly (non-destructive db push).
+  version Int @default(0)
+
   // Public client-facing share link (served at /p/[shareSlug]). shareSlug is an
   // unguessable random token, NOT the id, so a client holding one link can't
   // enumerate other listings. shareEnabled lets the agent revoke access without
