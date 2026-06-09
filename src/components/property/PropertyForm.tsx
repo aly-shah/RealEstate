@@ -5,6 +5,7 @@ import Link from "next/link";
 import { createProperty, type FormState } from "@/app/(app)/properties/actions";
 import { humanize } from "@/lib/format";
 import { CityAreaPicker } from "@/components/ui/CityAreaPicker";
+import { AddressAutocomplete } from "@/components/ui/AddressAutocomplete";
 
 const TYPES = ["APARTMENT", "VILLA", "RESIDENTIAL", "COMMERCIAL", "PLOT", "SHOP", "OFFICE"];
 const STATUSES = ["AVAILABLE", "PENDING_VERIFICATION", "RESERVED", "UNDER_NEGOTIATION", "RENTED", "SOLD", "INACTIVE"];
@@ -174,7 +175,10 @@ export function PropertyForm({ dealers, canPickDealer, onCancel }: PropertyFormP
         <SectionTitle>Location &amp; pricing</SectionTitle>
         <div className="space-y-4">
           <CityAreaPicker cityName="city" areaName="area" />
-          <div><label className="label" htmlFor="address">Address</label><input id="address" name="address" className="field" /></div>
+          <div>
+            <label className="label" htmlFor="address">Address</label>
+            <AddressAutocomplete name="address" latName="latitude" lonName="longitude" />
+          </div>
           {(showSale || showRent) && (
             <div className="grid gap-4 sm:grid-cols-2">
               {showSale && <div><label className="label" htmlFor="salePrice">Sale price (PKR)</label><input id="salePrice" name="salePrice" type="number" min="0" className="field" /></div>}

@@ -29,6 +29,10 @@ const propertySchema = z.object({
   city: z.string().optional(),
   area: z.string().optional(),
   address: z.string().optional(),
+  // Captured by the address autocomplete (OSM/Photon). Coordinates can be
+  // negative, so they get their own range-checked coercion (optNum is nonneg).
+  latitude: z.preprocess((v) => (v === "" || v == null ? undefined : v), z.coerce.number().min(-90).max(90).optional()),
+  longitude: z.preprocess((v) => (v === "" || v == null ? undefined : v), z.coerce.number().min(-180).max(180).optional()),
   description: z.string().optional(),
   salePrice: optNum,
   monthlyRent: optNum,
@@ -97,6 +101,8 @@ export async function createProperty(_prev: FormState, formData: FormData): Prom
     city: d.city || null,
     area: d.area || null,
     address: d.address || null,
+    latitude: d.latitude ?? null,
+    longitude: d.longitude ?? null,
     description: d.description || null,
     salePrice: num(d.salePrice),
     monthlyRent: num(d.monthlyRent),
