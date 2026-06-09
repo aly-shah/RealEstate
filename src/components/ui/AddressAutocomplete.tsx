@@ -73,10 +73,18 @@ export function AddressAutocomplete({
       abortRef.current = ac;
       setLoading(true);
       try {
-        const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=6&lang=en&lat=30.3753&lon=69.3451`;
+        // Pakistan-only. A bounding box can't separate PK from India (shared
+        // border — Delhi falls inside any PK-covering box), so the hard filter
+        // is countrycode === "PK". Over-fetch (limit 10) + proximity-bias to
+        // Pakistan so enough PK results remain after filtering, then show 6.
+        const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=10&lang=en&lat=30.3753&lon=69.3451`;
         const res = await fetch(url, { signal: ac.signal });
         const data = (await res.json()) as { features?: Parameters<typeof toSuggestion>[0][] };
-        const next = (data.features ?? []).map(toSuggestion).filter((s): s is Suggestion => s !== null);
+        const next = (data.features ?? [])
+          .filter((f) => f.properties?.countrycode === "PK")
+          .map(toSuggestion)
+          .filter((s): s is Suggestion => s !== null)
+          .slice(0, 6);
         setItems(next);
         setOpen(next.length > 0);
         setActive(-1);
