@@ -130,6 +130,17 @@ enum LeadScoreOverride {
   COLD
 }
 
+// Explicit classification of a Client's side of the market. Previously a Client
+// was undifferentiated (role implied only by what it was attached to); this lets
+// the CRM segment buyers vs. sellers vs. tenants vs. investors directly. Default
+// BUYER so existing rows backfill to the most common case on `prisma db push`.
+enum ClientType {
+  BUYER
+  SELLER
+  TENANT
+  INVESTOR
+}
+
 enum CalendarEventType {
   SHOWING
   MEETING
@@ -398,6 +409,7 @@ model Company {
   aiSuggestions   AiSuggestion[]
   whatsappTemplates WhatsAppTemplate[]
   idempotencyKeys IdempotencyKey[]
+  propertyViews   PropertyView[]
 }
 
 model User {
@@ -418,6 +430,11 @@ model User {
   // analytics table. NULL means the user hasn't been seen since this
   // column was added.
   lastSeenAt   DateTime?
+  // Round-robin cursor for the lead-routing engine (lib/lead-router.ts). The
+  // ROUND_ROBIN strategy assigns the next lead to the active agent with the
+  // oldest (or NULL) value here, then stamps it to now() — so assignment cycles
+  // evenly. NULL means "never received a routed lead", and sorts first.
+  lastLeadAssignedAt DateTime?
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
@@ -577,6 +594,7 @@ model Property {
   deals     Deal[]
   documents Document[]
   events    CalendarEvent[]
+  views     PropertyView[]
 
   @@unique([companyId, reference])
   @@index([companyId])
@@ -619,22 +637,26 @@ model PropertyAgent {
 // ─────────────────────────────────────────────────────────── CRM
 
 model Client {
-  id          String   @id @default(cuid())
+  id          String     @id @default(cuid())
   companyId   String
-  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  company     Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
   name        String
   phone       String?
   email       String?
   address     String?
+  // Which side of the market this contact represents. Drives CRM segmentation
+  // and (future) type-aware matching. Defaults BUYER (the most common case).
+  type        ClientType @default(BUYER)
   notes       String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @default(now()) @updatedAt
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @default(now()) @updatedAt
 
-  leads     Lead[]
-  showings  Showing[]
-  deals     Deal[]
-  invoices  Invoice[]
-  documents Document[]
+  leads         Lead[]
+  showings      Showing[]
+  deals         Deal[]
+  invoices      Invoice[]
+  documents     Document[]
+  propertyViews PropertyView[]
 
   @@index([companyId])
   // Speeds up the de-dup lookup in createLead (phone / email match within a tenant).
@@ -829,6 +851,14 @@ model Deal {
   lead       Lead?    @relation(fields: [leadId], references: [id], onDelete: SetNull)
 
   closeDate  DateTime?
+  // Forward-looking close estimate for pipeline forecasting. Distinct from
+  // closeDate, which is stamped only when the deal actually reaches CLOSED_WON.
+  estimatedCloseDate DateTime?
+  // Gross commission as a percentage of the deal value (the GCI% input).
+  // Captured at the deal level so reporting can compute Gross Commission Income
+  // directly without re-deriving it from the commission split. Decimal(5,2);
+  // 0 until set, which backfills existing rows cleanly on `prisma db push`.
+  grossCommissionPercentage Decimal @default(0) @db.Decimal(5, 2)
   // Populated when status transitions to CLOSED_LOST (required at UI + action).
   lostReason String?
   createdAt  DateTime  @default(now())
@@ -1292,4 +1322,34 @@ model IdempotencyKey {
   @@unique([companyId, scope, key])
   // Retention sweep deletes rows older than 7 days.
   @@index([createdAt])
+}
+
+// Telemetry for public client-facing share pages (/p/[shareSlug]). One row per
+// tracked view, written by the unauthenticated /api/share/track endpoint. The
+// viewer's IP is never stored raw — only a salted SHA-256 digest (ipHash) so
+// repeat-view detection works without holding PII. When the share link carries
+// a client token, clientId links the view to a known contact, which feeds the
+// lead-score "engagement" boost (lib/lead-score.ts) and the high-intent agent
+// alert. clientId SetNull so a deleted client doesn't drop the historical view;
+// companyId/propertyId Cascade because a view has no meaning once its tenant or
+// listing is gone.
+model PropertyView {
+  id         String   @id @default(cuid())
+  companyId  String
+  company    Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  propertyId String
+  property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  clientId   String?
+  client     Client?  @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  // Salted SHA-256 of the viewer IP — privacy-preserving, non-reversible.
+  ipHash     String
+  // Sanitised, length-capped User-Agent (nullable — bots/curl may omit it).
+  userAgent  String?
+  viewedAt   DateTime @default(now())
+
+  // "Views for property X within tenant" — the per-listing telemetry feed.
+  @@index([companyId, propertyId])
+  // "Views by client X within tenant" — drives the engagement score + the
+  // 4-views-on-one-listing high-intent alert.
+  @@index([companyId, clientId])
 }

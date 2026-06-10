@@ -1,4 +1,5 @@
 import type { LeadStage, LeadSource, InterestLevel, LeadScoreOverride } from "@prisma/client";
+import { prisma } from "@/lib/prisma";
 
 export type LeadBand = "HOT" | "WARM" | "COLD";
 
@@ -24,6 +25,13 @@ interface ScoreInput {
   topInterest?: InterestLevel | null;
   /** Has the lead been shown any property yet? */
   hasShowing: boolean;
+  /**
+   * Number of public-share-page views attributed to this lead's client
+   * (PropertyView rows). A strong digital-intent signal. Defaults to 0 when
+   * unknown. Callers either pass a batched count (list page) or use the async
+   * `scoreLeadWithViews` companion which reads it from the database.
+   */
+  viewCount?: number;
   /** Admin override; when set we still compute the raw score but the BAND is forced. */
   override?: LeadScoreOverride | null;
 }
@@ -145,6 +153,22 @@ export function scoreLead(input: ScoreInput): LeadScoreResult {
     }
   }
 
+  // Digital-engagement signal: how many times the lead's client has opened a
+  // shared listing page (PropertyView telemetry). Heavy repeat-viewing is one
+  // of the strongest "ready to act" signals, so it carries real weight — applied
+  // here, before the final clamp, so it can still be capped at 100.
+  const views = input.viewCount ?? 0;
+  if (views >= 10) {
+    score += 25;
+    reasons.push(`Viewed listings ${views}× (+25)`);
+  } else if (views >= 3) {
+    score += 12;
+    reasons.push(`Viewed listings ${views}× (+12)`);
+  } else if (views >= 1) {
+    score += 5;
+    reasons.push(`Viewed listings ${views}× (+5)`);
+  }
+
   // Clamp before band computation.
   score = Math.max(0, Math.min(100, Math.round(score)));
 
@@ -158,3 +182,29 @@ export function scoreLead(input: ScoreInput): LeadScoreResult {
   }
   return { score, band: bandFor(score), reasons, overridden: false };
 }
+
+/**
+ * Async companion to `scoreLead` that sources the engagement signal from the
+ * database. Pass the same inputs MINUS `viewCount`; this reads the lead's
+ * client's PropertyView count and delegates to the pure function.
+ *
+ * Use this in SINGLE-lead contexts (e.g. the lead detail page) where one extra
+ * COUNT is cheap. Do NOT call it inside a per-row map over a list — that's an
+ * N+1. For lists, fetch the counts once via a batched `propertyView.groupBy`
+ * keyed by clientId and pass `viewCount` into the pure `scoreLead` instead.
+ *
+ * The count is scoped to the client's views within the tenant; a lead with no
+ * client (clientId null) scores with viewCount 0.
+ */
+export async function scoreLeadWithViews(
+  input: Omit<ScoreInput, "viewCount">,
+  opts: { companyId: string; clientId?: string | null },
+): Promise<LeadScoreResult> {
+  const viewCount = opts.clientId
+    ? await prisma.propertyView.count({
+        where: { companyId: opts.companyId, clientId: opts.clientId },
+      })
+    : 0;
+  return scoreLead({ ...input, viewCount });
+}
+

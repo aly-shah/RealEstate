@@ -8,6 +8,7 @@ import { StatusBadge } from "@/components/ui/Badge";
 import { Icon } from "@/components/ui/Icon";
 import { MapView } from "@/components/map/MapView";
 import { PublicGallery } from "@/components/property/PublicGallery";
+import { PropertyTelemetry } from "@/components/share/PropertyTelemetry";
 
 // Client-safe projection: everything here is shown publicly. Note the absence
 // of dealer/owner, leads, showings, deals, documents, agents, activity and
@@ -120,8 +121,18 @@ function Spec({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
-export default async function PublicPropertyPage({ params }: { params: Promise<{ slug: string }> }) {
+export default async function PublicPropertyPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ slug: string }>;
+  searchParams: Promise<{ c?: string }>;
+}) {
   const { slug } = await params;
+  // Personalised share links may carry a client token (?c=<clientId>) so a view
+  // can be attributed to a known contact. Validated server-side in the track
+  // endpoint against the listing's tenant before it's persisted.
+  const { c: clientId } = await searchParams;
   const p = await getShared(slug);
 
   if (!p) {
@@ -161,6 +172,8 @@ export default async function PublicPropertyPage({ params }: { params: Promise<{
 
   return (
     <div className="min-h-screen bg-canvas">
+      {/* Invisible, deferred view beacon — records a tracked view after a dwell. */}
+      <PropertyTelemetry slug={slug} clientId={clientId ?? null} />
       <div className="h-1.5 w-full" style={{ backgroundColor: accent }} aria-hidden />
 
       {/* Branded header */}

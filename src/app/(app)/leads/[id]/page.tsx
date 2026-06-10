@@ -9,7 +9,7 @@ import { Section } from "@/components/ui/Section";
 import { StatusBadge } from "@/components/ui/Badge";
 import { Timeline } from "@/components/ui/Timeline";
 import { StageControl, AssignControl } from "@/components/lead/LeadControls";
-import { scoreLead } from "@/lib/lead-score";
+import { scoreLeadWithViews } from "@/lib/lead-score";
 import { leadHealth } from "@/lib/lead-health";
 import { findPropertyMatches } from "@/lib/lead-matching";
 import { LeadHealthBadge } from "@/components/lead/LeadHealthBadge";
@@ -128,16 +128,19 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
     null,
   );
 
-  const score = scoreLead({
-    stage: lead.stage,
-    source: lead.source,
-    hasBudget: !!(lead.budgetMin || lead.budgetMax),
-    hasProperty: !!lead.propertyId,
-    updatedAt: lead.updatedAt,
-    hasShowing: lead.showings.length > 0,
-    topInterest,
-    override: lead.scoreOverride,
-  });
+  const score = await scoreLeadWithViews(
+    {
+      stage: lead.stage,
+      source: lead.source,
+      hasBudget: !!(lead.budgetMin || lead.budgetMax),
+      hasProperty: !!lead.propertyId,
+      updatedAt: lead.updatedAt,
+      hasShowing: lead.showings.length > 0,
+      topInterest,
+      override: lead.scoreOverride,
+    },
+    { companyId: user.companyId, clientId: lead.clientId },
+  );
   const health = leadHealth({
     stage: lead.stage,
     lastContactedAt: lead.lastContactedAt,

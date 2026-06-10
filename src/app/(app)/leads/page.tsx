@@ -91,6 +91,21 @@ export default async function LeadsPage({
 
   const { items: leads, prevCursor, nextCursor } = sliceKeyset(rows, params, (l) => l.updatedAt);
 
+  // Batched share-page-view counts for the page's clients — one groupBy for the
+  // whole list (NOT one count per lead) so the engagement score stays N+1-free.
+  const clientIds = [...new Set(leads.map((l) => l.clientId).filter((id): id is string => !!id))];
+  const viewsByClient = new Map<string, number>();
+  if (clientIds.length > 0) {
+    const viewGroups = await prisma.propertyView.groupBy({
+      by: ["clientId"],
+      where: { companyId: user.companyId, clientId: { in: clientIds } },
+      _count: { _all: true },
+    });
+    for (const g of viewGroups) {
+      if (g.clientId) viewsByClient.set(g.clientId, g._count._all);
+    }
+  }
+
   // Lift the highest non-null interest level seen across showings. HIGH wins
   // over MEDIUM wins over LOW wins over NONE.
   const interestRank: Record<string, number> = { HIGH: 4, MEDIUM: 3, LOW: 2, NONE: 1 };
@@ -110,6 +125,7 @@ export default async function LeadsPage({
       updatedAt: l.updatedAt,
       hasShowing: l.showings.length > 0,
       topInterest,
+      viewCount: l.clientId ? viewsByClient.get(l.clientId) ?? 0 : 0,
       override: l.scoreOverride,
     });
     const health = leadHealth({
