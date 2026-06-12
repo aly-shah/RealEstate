@@ -1347,9 +1347,13 @@ model PropertyView {
   userAgent  String?
   viewedAt   DateTime @default(now())
 
-  // "Views for property X within tenant" — the per-listing telemetry feed.
-  @@index([companyId, propertyId])
-  // "Views by client X within tenant" — drives the engagement score + the
-  // 4-views-on-one-listing high-intent alert.
-  @@index([companyId, clientId])
+  // Per-client engagement. Serves both the lead-score view count
+  // (scoreLeadWithViews) and the leads-list batch groupBy — both filter by
+  // clientId, which already pins the tenant (a client belongs to one company).
+  // Also backs the SetNull when a client is deleted (clientId-leading).
+  @@index([clientId])
+  // "Views by this client on this listing" — the 4-views high-intent count in
+  // the track endpoint (WHERE propertyId, clientId). propertyId-leading, so it
+  // also makes the cascade efficient when a property is deleted.
+  @@index([propertyId, clientId])
 }
