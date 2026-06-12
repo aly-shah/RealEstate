@@ -201,6 +201,21 @@ enum AgreementStatus {
   COMPLETED
 }
 
+// Lifecycle of a rental e-sign / CNIC-verification Contract (model Contract).
+// DRAFT → both parties capture their CNIC via the public link → once both are
+// recorded it lands in PENDING_VERIFICATION for an office user to finalise →
+// ACTIVE → EXPIRED / TERMINATED. The two AWAITING_* states track which party
+// the flow is still waiting on.
+enum ContractStatus {
+  DRAFT
+  AWAITING_CNIC_LANDLORD
+  AWAITING_CNIC_RENTER
+  PENDING_VERIFICATION
+  ACTIVE
+  EXPIRED
+  TERMINATED
+}
+
 enum DealAgentRole {
   MAIN
   CO_AGENT
@@ -410,6 +425,7 @@ model Company {
   whatsappTemplates WhatsAppTemplate[]
   idempotencyKeys IdempotencyKey[]
   propertyViews   PropertyView[]
+  contracts       Contract[]
 }
 
 model User {
@@ -871,6 +887,7 @@ model Deal {
   invoices   Invoice[]
   commission Commission?
   documents  Document[]
+  contract   Contract?
 
   @@unique([companyId, reference])
   @@index([companyId])
@@ -911,6 +928,57 @@ model Rental {
   deposit         Decimal?  @db.Decimal(14, 2)
   leaseMonths     Int?
   renewalDate     DateTime?
+}
+
+// Rental e-sign / CNIC-verification contract. One per rental Deal (dealId is
+// unique). Terms are a frozen snapshot of the Rental at creation time so later
+// edits to the deal don't rewrite a legally-meaningful record. Each party gets
+// an unguessable token that backs a public verify link sent over WhatsApp; the
+// link lets them photograph their CNIC, which is OCR'd and recorded here.
+//
+// Note vs. the pasted spec: landlordId/renterId are nullable plain identifiers
+// (the renter's Client id, the landlord's phone) — NOT foreign keys — because a
+// landlord is a property owner who may have no Client/User row. The Document
+// written on verification links by dealId (always valid) and only sets clientId
+// for the renter when it's a real Client. CNIC numbers are stored as captured;
+// at-rest encryption (lib/crypto.ts) is a sensible future hardening.
+model Contract {
+  id                 String         @id @default(cuid())
+  companyId          String
+  dealId             String         @unique // Ties directly to a rental Deal.
+  status             ContractStatus @default(DRAFT)
+
+  // Terms mirrored from the Rental deal for legal-snapshot stability.
+  monthlyRent        Decimal        @db.Decimal(14, 2)
+  deposit            Decimal        @db.Decimal(14, 2)
+  leaseMonths        Int
+  startDate          DateTime
+  endDate            DateTime
+
+  // Landlord verification data. landlordId holds the best-available identifier
+  // (the property's ownerPhone) — not an FK.
+  landlordId         String?
+  landlordCnic       String?        // Extracted via OCR.
+  landlordCnicName   String?        // Extracted via OCR.
+  landlordVerifiedAt DateTime?
+  landlordToken      String         @unique @default(cuid()) // Public access-link token.
+
+  // Renter verification data. renterId holds the renter's Client id when set.
+  renterId           String?
+  renterCnic         String?        // Extracted via OCR.
+  renterCnicName     String?        // Extracted via OCR.
+  renterVerifiedAt   DateTime?
+  renterToken        String         @unique @default(cuid()) // Public access-link token.
+
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @default(now()) @updatedAt
+
+  company            Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  deal               Deal           @relation(fields: [dealId], references: [id], onDelete: Cascade)
+
+  // Tenant-scoped contract list. dealId/landlordToken/renterToken are already
+  // indexed by their @unique constraints, so the token lookups need no extra one.
+  @@index([companyId])
 }
 
 model Payment {

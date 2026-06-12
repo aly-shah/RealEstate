@@ -13,6 +13,7 @@ import { invalidateCompanyMetrics } from "@/lib/metrics";
 import { toNumber, humanize } from "@/lib/format";
 import { setFlash } from "@/lib/flash";
 import { nextDealReference } from "@/lib/refs";
+import { initiateContractPipelines } from "@/lib/contract-service";
 
 const dealSchema = z.object({
   propertyId: z.string().min(1, "Property is required"),
@@ -260,4 +261,51 @@ export async function generateCommission(formData: FormData): Promise<void> {
   invalidateCompanyMetrics(user.companyId);
   revalidatePath(`/deals/${dealId}`);
   revalidatePath("/commissions");
+}
+
+/**
+ * Start the rental CNIC e-sign pipeline for a deal: create the Contract (if not
+ * already present) and dispatch the landlord + renter verify links over
+ * WhatsApp. Office-only (recordDeals); tenant-scoped. Non-fatal delivery issues
+ * surface as a `warn` flash with the links so the agent can share manually.
+ */
+export async function startRentalContract(formData: FormData): Promise<void> {
+  const user = await requireCompanyUser();
+  if (!can(user.role, "recordDeals")) return;
+
+  const dealId = String(formData.get("dealId") || "");
+  if (!dealId) return;
+
+  // Scope: the deal must belong to this tenant before we touch it.
+  const deal = await prisma.deal.findFirst({
+    where: { id: dealId, companyId: user.companyId },
+    select: { id: true, type: true, reference: true },
+  });
+  if (!deal) return;
+  if (deal.type !== "RENTAL") {
+    await setFlash({ tone: "danger", message: "CNIC contracts are only available on rental deals." });
+    revalidatePath(`/deals/${dealId}`);
+    return;
+  }
+
+  try {
+    const res = await initiateContractPipelines(dealId);
+    await logActivity({
+      companyId: user.companyId,
+      userId: user.id,
+      action: "contract.initiated",
+      entityType: "DEAL",
+      entityId: dealId,
+      summary: `Started CNIC e-sign for ${deal.reference}`,
+      meta: { contractId: res.contractId, landlordSent: res.landlordSent, renterSent: res.renterSent },
+    });
+    if (res.warnings.length > 0) {
+      await setFlash({ tone: "warn", message: res.warnings.join(" ") });
+    } else {
+      await setFlash({ tone: "ok", message: "CNIC verification links sent to the landlord and renter." });
+    }
+  } catch (e) {
+    await setFlash({ tone: "danger", message: e instanceof Error ? e.message : "Could not start the contract." });
+  }
+  revalidatePath(`/deals/${dealId}`);
 }
