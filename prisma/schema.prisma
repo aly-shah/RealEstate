@@ -667,12 +667,13 @@ model Client {
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @default(now()) @updatedAt
 
-  leads         Lead[]
-  showings      Showing[]
-  deals         Deal[]
-  invoices      Invoice[]
-  documents     Document[]
-  propertyViews PropertyView[]
+  leads           Lead[]
+  showings        Showing[]
+  deals           Deal[]
+  invoices        Invoice[]
+  documents       Document[]
+  propertyViews   PropertyView[]
+  rentalContracts Contract[]
 
   @@index([companyId])
   // Speeds up the de-dup lookup in createLead (phone / email match within a tenant).
@@ -963,7 +964,7 @@ model Contract {
   landlordVerifiedAt DateTime?
   landlordToken      String         @unique @default(cuid()) // Public access-link token.
 
-  // Renter verification data. renterId holds the renter's Client id when set.
+  // Renter verification data. renterId is the renter's Client id (FK `renter`).
   renterId           String?
   renterCnic         String?        // Extracted via OCR.
   renterCnicName     String?        // Extracted via OCR.
@@ -975,10 +976,20 @@ model Contract {
 
   company            Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
   deal               Deal           @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  // The renter is a real Client (the landlord is a property owner with no Client
+  // row, so landlordId stays a plain identifier). SetNull preserves the
+  // historical contract if the client is deleted.
+  renter             Client?        @relation(fields: [renterId], references: [id], onDelete: SetNull)
 
-  // Tenant-scoped contract list. dealId/landlordToken/renterToken are already
-  // indexed by their @unique constraints, so the token lookups need no extra one.
+  // dealId / landlordToken / renterToken are already indexed by their @unique
+  // constraints, so the token + deal lookups need no extra index.
   @@index([companyId])
+  // "Contracts to finalise" office queue (status = PENDING_VERIFICATION) +
+  // tenant-scoped list — mirrors the [companyId, status] index every other
+  // status-bearing model carries.
+  @@index([companyId, status])
+  // Efficient SetNull when a renter Client is deleted.
+  @@index([renterId])
 }
 
 model Payment {
