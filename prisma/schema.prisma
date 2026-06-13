@@ -1070,6 +1070,11 @@ model Invoice {
   // List page filters by status; index supports the "draft/issued/paid/overdue"
   // tabs without sequential scan.
   @@index([companyId, status])
+  // Deal detail page lists a deal's invoices (`include: { invoices: true }` →
+  // Invoice WHERE dealId). Without this every deal-detail view scans the Invoice
+  // table; also keeps the SetNull cheap when a deal is deleted. Mirrors
+  // Payment.dealId / Document.dealId.
+  @@index([dealId])
 }
 
 model CommissionRule {
