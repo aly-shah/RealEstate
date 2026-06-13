@@ -15,6 +15,7 @@ import {
   CreateInvoiceForm,
 } from "@/components/deal/DealControls";
 import { markPaymentPaid } from "@/app/(app)/payments/actions";
+import { startRentalContract } from "@/app/(app)/deals/actions";
 import { WhatsAppButton } from "@/components/whatsapp/WhatsAppButton";
 import { TEMPLATES } from "@/lib/whatsapp";
 
@@ -44,6 +45,9 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
       payments: { orderBy: { createdAt: "asc" } },
       commission: { include: { shares: true } },
       documents: true,
+      // Only the fields the lease-verification panel renders — never pull the
+      // raw CNIC numbers into the page.
+      contract: { select: { id: true, status: true, landlordVerifiedAt: true, renterVerifiedAt: true } },
       invoices: {
         include: { payments: { where: { status: "PAID" }, select: { amount: true } } },
         orderBy: { issuedAt: "desc" },
@@ -218,6 +222,46 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
           {office && (
             <Section title="Deal status">
               <DealStatusChanger id={deal.id} current={deal.status} />
+            </Section>
+          )}
+
+          {office && deal.type === "RENTAL" && (
+            <Section title="Lease verification">
+              {deal.contract ? (
+                <>
+                  <Row label="Status" value={<StatusBadge status={deal.contract.status} />} />
+                  <Row
+                    label="Landlord CNIC"
+                    value={
+                      deal.contract.landlordVerifiedAt
+                        ? <span className="font-medium text-ok">Verified</span>
+                        : <span className="text-muted">Awaiting</span>
+                    }
+                  />
+                  <Row
+                    label="Renter CNIC"
+                    value={
+                      deal.contract.renterVerifiedAt
+                        ? <span className="font-medium text-ok">Verified</span>
+                        : <span className="text-muted">Awaiting</span>
+                    }
+                  />
+                  <form action={startRentalContract} className="mt-3">
+                    <input type="hidden" name="dealId" value={deal.id} />
+                    <button className="btn-ghost w-full justify-center text-xs">Resend CNIC links</button>
+                  </form>
+                </>
+              ) : (
+                <>
+                  <p className="mb-3 text-sm text-muted">
+                    Send the landlord and renter a secure WhatsApp link to photograph their CNIC for the lease agreement.
+                  </p>
+                  <form action={startRentalContract}>
+                    <input type="hidden" name="dealId" value={deal.id} />
+                    <button className="btn-accent w-full justify-center">Start CNIC verification</button>
+                  </form>
+                </>
+              )}
             </Section>
           )}
 

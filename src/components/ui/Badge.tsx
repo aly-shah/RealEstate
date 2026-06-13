@@ -56,6 +56,11 @@ export const STATUS_TONE: Record<string, Tone> = {
   VERIFIED: "ok",
   REJECTED: "danger",
   FLAGGED: "warn",
+  // contracts (e-sign) — DRAFT/PENDING_VERIFICATION/ACTIVE reuse entries above
+  AWAITING_CNIC_LANDLORD: "warn",
+  AWAITING_CNIC_RENTER: "warn",
+  EXPIRED: "neutral",
+  TERMINATED: "danger",
   // generic + billing
   ACTIVE: "ok",
   SUSPENDED: "danger",
