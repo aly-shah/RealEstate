@@ -898,6 +898,10 @@ model Deal {
   // Deals derived from a specific lead (lead detail page sidebar).
   @@index([leadId])
   @@index([dealerId])
+  // Property detail page lists a listing's deals (`include: { deals: true }`).
+  // propertyId is a required FK, so without this every property-detail view
+  // full-scans the Deal table. Mirrors Lead/Showing/Document.propertyId.
+  @@index([propertyId])
 }
 
 model DealAgent {
