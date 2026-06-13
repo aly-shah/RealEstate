@@ -1185,8 +1185,14 @@ model Document {
   @@index([companyId, expiryDate])
   // Documents list page orders by createdAt desc within tenant.
   @@index([companyId, createdAt])
-  // Property detail page lists docs by propertyId.
+  // Detail pages list docs by their subject FK (deal/[id], dealer/[id],
+  // property/[id] all `include: { documents: true }`). Each index makes that
+  // lookup a seek instead of a tenant-wide scan, and keeps the SetNull cheap
+  // when the subject is deleted. clientId is intentionally left unindexed — no
+  // page lists documents by client, so it'd only serve the rare client-delete.
   @@index([propertyId])
+  @@index([dealId])
+  @@index([dealerId])
 }
 
 model ActivityLog {
