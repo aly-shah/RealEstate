@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
-import { logActivity } from "@/lib/activity";
+import { logActivity, notify } from "@/lib/activity";
+import { money, fmtDate, humanize } from "@/lib/format";
 import { decryptSecret } from "@/lib/crypto";
 import { pingWhatsAppToken, fetchTemplateCatalog } from "@/lib/wa-business";
 import { persistTemplateCatalog } from "@/lib/wa-templates";
@@ -189,6 +190,114 @@ export async function sweepExpiredTrials(): Promise<SweepResult> {
   );
 
   return { trialsExpired: expired.length };
+}
+
+export interface PaymentReminderResult {
+  /** Payments inspected this run (after the freshness gate). */
+  paymentsChecked: number;
+  /** Total in-app reminders created (one per recipient). */
+  remindersSent: number;
+}
+
+// Start reminding this far before the due date, and don't re-remind the same
+// payment more often than this (covers both the due-soon nudge and the
+// recurring overdue nudge without daily spam).
+const DUE_SOON_MS = 3 * 86_400_000;
+const REMINDER_INTERVAL_MS = 3 * 86_400_000;
+// Bound a single run; the rest are caught on the next daily tick.
+const REMINDER_BATCH = 500;
+
+/**
+ * Payment-reminder sweep. Finds unpaid (PENDING/PARTIAL) payments that are due
+ * within DUE_SOON_MS or already overdue, and sends an in-app reminder to the
+ * deal's main agent (or the company's office if there's no main agent). The
+ * `lastReminderAt` column gates re-sends so a payment isn't re-notified every
+ * day — at most once per REMINDER_INTERVAL_MS.
+ *
+ * In-app only today (PAYMENT_DUE / PAYMENT_OVERDUE notifications); when WhatsApp
+ * templates are wired this is the natural place to also enqueue a WA send.
+ * Caller (tick endpoint) throttles to once per 24h. Idempotent + no-op when
+ * nothing is due.
+ */
+export async function sweepPaymentReminders(): Promise<PaymentReminderResult> {
+  const now = new Date();
+  const dueSoonCutoff = new Date(now.getTime() + DUE_SOON_MS);
+  const reminderCutoff = new Date(now.getTime() - REMINDER_INTERVAL_MS);
+
+  const payments = await prisma.payment.findMany({
+    where: {
+      status: { in: ["PENDING", "PARTIAL"] },
+      dueDate: { not: null, lte: dueSoonCutoff },
+      OR: [{ lastReminderAt: null }, { lastReminderAt: { lt: reminderCutoff } }],
+    },
+    select: {
+      id: true,
+      companyId: true,
+      amount: true,
+      dueDate: true,
+      type: true,
+      dealId: true,
+      deal: { select: { reference: true, agents: { where: { role: "MAIN" }, select: { agentId: true } } } },
+    },
+    take: REMINDER_BATCH,
+  });
+  if (payments.length === 0) return { paymentsChecked: 0, remindersSent: 0 };
+
+  // Lazily cache office recipients per company for payments with no main agent.
+  const officeCache = new Map<string, string[]>();
+  const officeUsers = async (companyId: string): Promise<string[]> => {
+    const hit = officeCache.get(companyId);
+    if (hit) return hit;
+    const users = await prisma.user.findMany({
+      where: { companyId, role: { in: ["OWNER", "ADMIN"] }, status: "ACTIVE" },
+      select: { id: true },
+    });
+    const ids = users.map((u) => u.id);
+    officeCache.set(companyId, ids);
+    return ids;
+  };
+
+  let remindersSent = 0;
+  const remindedIds: string[] = [];
+
+  for (const p of payments) {
+    const due = p.dueDate!;
+    const overdue = due < now;
+    const mainAgentId = p.deal?.agents[0]?.agentId ?? null;
+    const recipients = mainAgentId ? [mainAgentId] : await officeUsers(p.companyId);
+    // Nobody to tell (e.g. office all suspended) — leave it for a future run
+    // rather than marking it reminded.
+    if (recipients.length === 0) continue;
+
+    const ref = p.deal?.reference;
+    const title = `${overdue ? "Payment overdue" : "Payment due soon"}${ref ? ` — ${ref}` : ""}`;
+    const body = `${humanize(p.type)} of ${money(p.amount)} ${overdue ? "was due" : "is due"} ${fmtDate(due)}.`;
+    const link = p.dealId ? `/deals/${p.dealId}` : "/payments";
+
+    await Promise.all(
+      recipients.map((userId) =>
+        notify({
+          companyId: p.companyId,
+          userId,
+          type: overdue ? "PAYMENT_OVERDUE" : "PAYMENT_DUE",
+          title,
+          body,
+          link,
+        }),
+      ),
+    );
+    remindersSent += recipients.length;
+    remindedIds.push(p.id);
+  }
+
+  if (remindedIds.length > 0) {
+    await prisma.payment.updateMany({
+      where: { id: { in: remindedIds } },
+      data: { lastReminderAt: now },
+    });
+  }
+
+  return { paymentsChecked: payments.length, remindersSent };
 }
 
 export interface TokenProbeResult {

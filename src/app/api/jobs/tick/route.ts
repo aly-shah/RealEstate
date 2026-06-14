@@ -7,6 +7,7 @@ import {
   purgeOldRows,
   sweepWhatsAppTokens,
   sweepWhatsAppTemplateCatalog,
+  sweepPaymentReminders,
 } from "@/lib/jobs/sweeps";
 
 export const runtime = "nodejs";
@@ -19,6 +20,7 @@ const g = globalThis as unknown as {
   __lastPurgeAt?: number;
   __lastWhatsAppProbeAt?: number;
   __lastWhatsAppCatalogAt?: number;
+  __lastPaymentReminderAt?: number;
 };
 
 /**
@@ -60,10 +62,15 @@ export async function POST(req: NextRequest) {
   let purge: Awaited<ReturnType<typeof purgeOldRows>> | null = null;
   let waProbe: Awaited<ReturnType<typeof sweepWhatsAppTokens>> | null = null;
   let waCatalog: Awaited<ReturnType<typeof sweepWhatsAppTemplateCatalog>> | null = null;
+  let paymentReminders: Awaited<ReturnType<typeof sweepPaymentReminders>> | null = null;
   const now = Date.now();
   if (!g.__lastPurgeAt || now - g.__lastPurgeAt >= DAILY_INTERVAL_MS) {
     purge = await purgeOldRows();
     g.__lastPurgeAt = now;
+  }
+  if (!g.__lastPaymentReminderAt || now - g.__lastPaymentReminderAt >= DAILY_INTERVAL_MS) {
+    paymentReminders = await sweepPaymentReminders();
+    g.__lastPaymentReminderAt = now;
   }
   if (!g.__lastWhatsAppProbeAt || now - g.__lastWhatsAppProbeAt >= DAILY_INTERVAL_MS) {
     // Token probe + catalog refresh share the same daily throttle. Both
@@ -83,6 +90,7 @@ export async function POST(req: NextRequest) {
     purge,
     waProbe,
     waCatalog,
+    paymentReminders,
     at: new Date().toISOString(),
   });
 }

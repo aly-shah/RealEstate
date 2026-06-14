@@ -1034,6 +1034,9 @@ model Payment {
   dueDate   DateTime?
   paidAt    DateTime?
   notes     String?
+  // Last time a due/overdue reminder was sent — gates the payment-reminder
+  // sweep (lib/jobs/sweeps.ts) so it doesn't re-notify the same payment daily.
+  lastReminderAt DateTime?
   createdAt DateTime      @default(now())
   updatedAt DateTime      @default(now()) @updatedAt
 
