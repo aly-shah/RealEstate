@@ -7,9 +7,43 @@ import {
   updateCommissionRule,
   updateCompanyBranding,
   updateIntegrations,
+  updateLeadRouting,
   type FormState,
 } from "./actions";
 import { syncWhatsappTemplates } from "./whatsapp-actions";
+
+const ROUTING_OPTIONS = [
+  { value: "MANUAL", label: "Manual — office triages from the leads list (default)" },
+  { value: "ROUND_ROBIN", label: "Round-robin — cycle active agents evenly" },
+  { value: "TERRITORY_MATCH", label: "Territory match — prefer an agent who's closed in the area" },
+  { value: "SHARK_TANK", label: "Shark tank — alert all agents to claim the lead" },
+] as const;
+
+/** Company auto lead-routing strategy for incoming unassigned leads. */
+export function LeadRoutingForm({ strategy }: { strategy: string }) {
+  const [state, action, pending] = useActionState<FormState, FormData>(updateLeadRouting, {});
+
+  return (
+    <form action={action} className="space-y-3">
+      <div className="max-w-xl">
+        <label className="label" htmlFor="strategy">Routing strategy</label>
+        <select id="strategy" name="strategy" defaultValue={strategy} className="field">
+          {ROUTING_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>{o.label}</option>
+          ))}
+        </select>
+        <p className="mt-1 text-xs text-muted">
+          Applies to new leads that arrive without an agent (office-created &ldquo;Unassigned&rdquo;
+          and imports). Agent-created leads stay with their creator.
+        </p>
+      </div>
+      {state.error && <p className="text-xs text-danger">{state.error}</p>}
+      <button type="submit" disabled={pending} className="btn-accent">
+        {pending ? "Saving…" : "Save routing"}
+      </button>
+    </form>
+  );
+}
 
 interface RuleDefaults {
   mainAgentPct: number;

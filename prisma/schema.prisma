@@ -141,6 +141,17 @@ enum ClientType {
   INVESTOR
 }
 
+// How incoming UNASSIGNED leads are auto-assigned (see lib/lead-router.ts).
+// MANUAL (default) keeps the existing behaviour — office triages from the leads
+// list. ROUND_ROBIN cycles active agents; TERRITORY_MATCH prefers the agent who
+// has closed in the lead's area; SHARK_TANK broadcasts to all agents to claim.
+enum LeadRoutingStrategy {
+  MANUAL
+  ROUND_ROBIN
+  TERRITORY_MATCH
+  SHARK_TANK
+}
+
 enum CalendarEventType {
   SHOWING
   MEETING
@@ -373,6 +384,10 @@ model Company {
   // their plan grants it. Plan-budget enforcement still runs on top of
   // this flag; see lib/ai/budget.ts.
   aiEnabled         Boolean       @default(true)
+
+  // Auto-routing strategy for incoming unassigned leads. MANUAL = no auto-route
+  // (office triages from the leads list). See lib/lead-router.ts.
+  leadRoutingStrategy LeadRoutingStrategy @default(MANUAL)
 
   // Meta WhatsApp Cloud API `phone_number_id` for this tenant's business
   // line. Used by the inbound webhook to route messages to the correct

@@ -35,6 +35,23 @@ export interface RouterConfig {
   strategy: RoutingStrategy;
 }
 
+/**
+ * Convenience entry used by lead-creation paths: reads the company's configured
+ * leadRoutingStrategy and routes the lead unless it's MANUAL (the default, which
+ * leaves the lead for office triage). Best-effort — never throws into the
+ * caller, since routeIncomingLead already swallows its own errors.
+ */
+export async function routeForCompany(leadId: string, companyId: string): Promise<void> {
+  const company = await prisma.company.findUnique({
+    where: { id: companyId },
+    select: { leadRoutingStrategy: true },
+  });
+  const strategy = company?.leadRoutingStrategy;
+  if (!strategy || strategy === "MANUAL") return;
+  // After excluding MANUAL the remaining values are exactly RoutingStrategy.
+  await routeIncomingLead(leadId, { companyId, strategy });
+}
+
 /** Minimal projection the router needs to make and announce a decision. */
 interface RoutableLead {
   id: string;

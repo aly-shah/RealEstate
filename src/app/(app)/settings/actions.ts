@@ -356,3 +356,36 @@ export async function updateIntegrations(
   revalidatePath("/settings");
   return { ok: true };
 }
+
+const leadRoutingSchema = z.object({
+  strategy: z.enum(["MANUAL", "ROUND_ROBIN", "TERRITORY_MATCH", "SHARK_TANK"]),
+});
+
+/**
+ * Set the company's auto lead-routing strategy. Gated to the roles that manage
+ * lead assignment (assignLeadsCalendars = OWNER/ADMIN). MANUAL disables
+ * auto-routing — incoming unassigned leads stay for manual triage.
+ */
+export async function updateLeadRouting(_prev: FormState, formData: FormData): Promise<FormState> {
+  const user = await requireCompanyUser();
+  if (!can(user.role, "assignLeadsCalendars")) return { error: "Not allowed." };
+
+  const parsed = leadRoutingSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { error: "Pick a valid routing strategy." };
+
+  await prisma.company.update({
+    where: { id: user.companyId },
+    data: { leadRoutingStrategy: parsed.data.strategy },
+  });
+  await logActivity({
+    companyId: user.companyId,
+    userId: user.id,
+    action: "company.lead_routing_updated",
+    entityType: "COMPANY",
+    entityId: user.companyId,
+    summary: `Lead routing → ${parsed.data.strategy.replace(/_/g, " ").toLowerCase()}`,
+  });
+  await setFlash({ tone: "ok", message: "Lead routing saved." });
+  revalidatePath("/settings");
+  return { ok: true };
+}

@@ -12,6 +12,7 @@ import {
   NewUserForm,
   BrandingForm,
   IntegrationsForm,
+  LeadRoutingForm,
   WhatsappTemplatesPanel,
 } from "./SettingsForms";
 import { setUserStatus } from "./actions";
@@ -58,6 +59,7 @@ export default async function SettingsPage() {
         whatsappPhoneId: true, whatsappAccessToken: true, aiEnabled: true,
         // Risk-fix follow-up: WABA id drives template-catalog sync.
         whatsappBusinessAccountId: true,
+        leadRoutingStrategy: true,
       },
     }),
     planUsageSnapshot(companyId),
@@ -112,6 +114,16 @@ export default async function SettingsPage() {
         <Section title="Default commission split">
           <p className="mb-4 text-sm text-muted">These percentages apply to every deal unless a property overrides them. They must total 100%.</p>
           <CommissionRuleForm defaults={defaults} />
+        </Section>
+      )}
+
+      {can(user.role, "assignLeadsCalendars") && company && (
+        <Section title="Lead routing">
+          <p className="mb-4 text-sm text-muted">
+            Choose how incoming unassigned leads are auto-assigned. Manual keeps the current
+            behaviour — leads wait in the list for you to assign.
+          </p>
+          <LeadRoutingForm strategy={company.leadRoutingStrategy} />
         </Section>
       )}
 

@@ -10,6 +10,7 @@ import { can } from "@/lib/rbac";
 import { logActivity, notify } from "@/lib/activity";
 import { humanize } from "@/lib/format";
 import { scheduleAutoFollowUp } from "@/lib/lead-followups";
+import { routeForCompany } from "@/lib/lead-router";
 import { setFlash } from "@/lib/flash";
 
 const leadSchema = z.object({
@@ -122,6 +123,13 @@ export async function createLead(_prev: FormState, formData: FormData): Promise<
       body: linkedClient.name,
       link: `/leads/${lead.id}`,
     });
+  }
+
+  // Auto-route an unassigned lead per the company's configured strategy. The
+  // engine assigns + notifies + schedules its own follow-up, so the agentId-
+  // guarded blocks below stay no-ops here. MANUAL (default) → skipped.
+  if (!agentId) {
+    await routeForCompany(lead.id, user.companyId);
   }
 
   // Phase 4: auto-schedule the first follow-up. No-op when there's no agent
