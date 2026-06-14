@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { toNumber } from "@/lib/format";
-import type { LeadStage, LeadSource } from "@prisma/client";
+import type { LeadStage, LeadSource, DealStatus } from "@prisma/client";
 
 /* ─────────────────────────────────────────────────────────── Date-range parsing */
 
@@ -339,4 +339,145 @@ export async function visitVerificationStats(
     rejected,
     verificationRate: total ? Math.round((verified / total) * 100) : 0,
   };
+}
+
+/* ─────────────────────────────────────────── Gross Commission Income (GCI) */
+
+export interface GciRow {
+  agentId: string;
+  name: string;
+  deals: number;
+  /** Closed-won deal value attributed to this agent (sale price / monthly rent). */
+  value: number;
+  /** Gross commission income = value × grossCommissionPercentage. */
+  gci: number;
+}
+
+export interface GciResult {
+  rows: GciRow[];
+  totalGci: number;
+  /** GCI from closed-won deals that have no MAIN agent on record. */
+  unattributed: number;
+}
+
+/**
+ * Gross Commission Income by agent for CLOSED_WON deals in the window. GCI is
+ * the company's gross commission on the deal — deal value × the deal's
+ * grossCommissionPercentage. Deals where that percentage is still 0 (e.g. closed
+ * before the field existed, or never filled in) contribute 0 and simply don't
+ * lift the totals until the % is recorded on the deal.
+ */
+export async function grossCommissionByAgent(companyId: string, range: DateRange): Promise<GciResult> {
+  const deals = await prisma.deal.findMany({
+    where: { companyId, status: "CLOSED_WON", closeDate: { gte: range.from, lte: range.to } },
+    select: {
+      grossCommissionPercentage: true,
+      sale: { select: { salePrice: true } },
+      rental: { select: { monthlyRent: true } },
+      agents: { where: { role: "MAIN" }, select: { agentId: true, agent: { select: { name: true } } } },
+    },
+  });
+
+  const map = new Map<string, GciRow>();
+  let totalGci = 0;
+  let unattributed = 0;
+  for (const d of deals) {
+    const value = toNumber(d.sale?.salePrice ?? d.rental?.monthlyRent);
+    const gci = (value * toNumber(d.grossCommissionPercentage)) / 100;
+    totalGci += gci;
+    const main = d.agents[0];
+    if (!main) {
+      unattributed += gci;
+      continue;
+    }
+    const row = map.get(main.agentId) ?? { agentId: main.agentId, name: main.agent.name, deals: 0, value: 0, gci: 0 };
+    row.deals += 1;
+    row.value += value;
+    row.gci += gci;
+    map.set(main.agentId, row);
+  }
+
+  return { rows: [...map.values()].sort((a, b) => b.gci - a.gci), totalGci, unattributed };
+}
+
+/* ─────────────────────────────────────────── Pipeline forecast (weighted) */
+
+// Probability that an open deal at each stage eventually closes-won. Used to
+// risk-weight the open pipeline into an expected-revenue figure.
+const STAGE_WIN_WEIGHT: Record<DealStatus, number> = {
+  DRAFT: 0.1,
+  NEGOTIATION: 0.3,
+  TOKEN: 0.6,
+  BOOKED: 0.8,
+  AGREEMENT: 0.9,
+  CLOSED_WON: 1,
+  CLOSED_LOST: 0,
+};
+
+const FORECAST_STAGE_ORDER: DealStatus[] = ["DRAFT", "NEGOTIATION", "TOKEN", "BOOKED", "AGREEMENT"];
+
+export interface ForecastStageRow {
+  status: DealStatus;
+  weight: number;
+  deals: number;
+  openValue: number;
+  weightedValue: number;
+}
+
+export interface PipelineForecast {
+  byStage: ForecastStageRow[];
+  openDeals: number;
+  /** Raw sum of open-deal values (unweighted). */
+  totalOpenValue: number;
+  /** Stage-probability-weighted expected revenue from the open pipeline. */
+  totalWeightedValue: number;
+  /** Weighted expected GCI (weighted value × each deal's gross commission %). */
+  totalWeightedGci: number;
+  /** Weighted value of deals whose estimatedCloseDate is within the next 90 days. */
+  next90Weighted: number;
+}
+
+/**
+ * Risk-weighted pipeline forecast. For every open (non-closed) deal, weight its
+ * value by the stage's win probability to produce an expected-revenue figure,
+ * broken down by stage. `next90Weighted` narrows to deals expected to close
+ * within 90 days (by estimatedCloseDate) for a near-term view.
+ */
+export async function pipelineForecast(companyId: string): Promise<PipelineForecast> {
+  const deals = await prisma.deal.findMany({
+    where: { companyId, status: { notIn: ["CLOSED_WON", "CLOSED_LOST"] } },
+    select: {
+      status: true,
+      estimatedCloseDate: true,
+      grossCommissionPercentage: true,
+      sale: { select: { salePrice: true } },
+      rental: { select: { monthlyRent: true } },
+    },
+  });
+
+  const map = new Map<DealStatus, ForecastStageRow>();
+  let totalOpenValue = 0;
+  let totalWeightedValue = 0;
+  let totalWeightedGci = 0;
+  let next90Weighted = 0;
+  const horizon = new Date(Date.now() + 90 * 86_400_000);
+
+  for (const d of deals) {
+    const value = toNumber(d.sale?.salePrice ?? d.rental?.monthlyRent);
+    const weight = STAGE_WIN_WEIGHT[d.status] ?? 0;
+    const weighted = value * weight;
+    totalOpenValue += value;
+    totalWeightedValue += weighted;
+    totalWeightedGci += (weighted * toNumber(d.grossCommissionPercentage)) / 100;
+    if (d.estimatedCloseDate && d.estimatedCloseDate <= horizon) next90Weighted += weighted;
+
+    const row = map.get(d.status) ?? { status: d.status, weight, deals: 0, openValue: 0, weightedValue: 0 };
+    row.deals += 1;
+    row.openValue += value;
+    row.weightedValue += weighted;
+    map.set(d.status, row);
+  }
+
+  const byStage = FORECAST_STAGE_ORDER.map((s) => map.get(s)).filter((r): r is ForecastStageRow => !!r);
+  return { byStage, openDeals: deals.length, totalOpenValue, totalWeightedValue, totalWeightedGci, next90Weighted };
 }

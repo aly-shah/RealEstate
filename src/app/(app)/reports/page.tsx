@@ -23,6 +23,8 @@ import {
   paymentOverdueAging,
   propertyInventoryAging,
   visitVerificationStats,
+  grossCommissionByAgent,
+  pipelineForecast,
 } from "@/lib/reports";
 import { DateRangeFilter } from "@/components/reports/DateRangeFilter";
 import { OwnerInsightPanel } from "@/components/reports/OwnerInsightPanel";
@@ -71,6 +73,7 @@ export default async function ReportsPage({
     revMonth, revAll, comm, pay, board, inv,
     salesCount, rentalsCount, lostLeads, lostDeals, leadsByStage, dealers, payouts,
     salesVsRentals, sourceConversion, funnelSteps, overdueAging, inventoryAging, visitStats,
+    gci, forecast,
   ] = await Promise.all([
     salesRevenue(companyId, since),
     salesRevenue(companyId),
@@ -113,6 +116,8 @@ export default async function ReportsPage({
     paymentOverdueAging(companyId),
     propertyInventoryAging(companyId),
     visitVerificationStats(companyId, range),
+    grossCommissionByAgent(companyId, range),
+    pipelineForecast(companyId),
   ]);
 
   // Area performance from closed deals.
@@ -285,6 +290,62 @@ export default async function ReportsPage({
         <StatCard label="Lead conversion" value={`${conversion}%`} sub={`${wonLeads}/${totalLeads} won`} />
         <StatCard label="Outstanding" value={compactMoney(pay.total)} sub={`${compactMoney(pay.overdue)} overdue`} />
       </div>
+
+      <Section title="Pipeline forecast (weighted)">
+        <p className="mb-4 text-sm text-muted">
+          Open-deal value weighted by each stage&rsquo;s win probability. &ldquo;Expected GCI&rdquo; applies each
+          deal&rsquo;s gross-commission&nbsp;%.
+        </p>
+        <div className="mb-4 grid gap-3 sm:grid-cols-4">
+          <StatCard label="Weighted pipeline" value={compactMoney(forecast.totalWeightedValue)} sub={`${compactMoney(forecast.totalOpenValue)} open`} tone="ink" />
+          <StatCard label="Expected GCI" value={compactMoney(forecast.totalWeightedGci)} sub="risk-weighted" tone="accent" />
+          <StatCard label="Next 90 days" value={compactMoney(forecast.next90Weighted)} sub="by est. close date" />
+          <StatCard label="Open deals" value={String(forecast.openDeals)} sub="in pipeline" />
+        </div>
+        {forecast.byStage.length === 0 ? (
+          <p className="text-sm text-muted">No open deals in the pipeline.</p>
+        ) : (
+          <div>
+            {forecast.byStage.map((s) => (
+              <div key={s.status} className="flex items-center justify-between border-b border-line-soft py-2 text-sm last:border-0">
+                <span className="text-ink">
+                  {humanize(s.status)}
+                  <span className="ml-2 text-xs text-muted">{s.deals} deal{s.deals === 1 ? "" : "s"} · {Math.round(s.weight * 100)}% win</span>
+                </span>
+                <span className="font-medium text-ink">
+                  {money(s.weightedValue)} <span className="text-xs text-muted">of {compactMoney(s.openValue)}</span>
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </Section>
+
+      <Section title="Gross Commission Income · by agent · in window">
+        {gci.rows.length === 0 ? (
+          <p className="text-sm text-muted">
+            No GCI in this window. Set a deal&rsquo;s gross-commission&nbsp;% to populate this.
+          </p>
+        ) : (
+          <>
+            <div className="mb-3 flex justify-between border-b border-line-soft py-2 text-sm">
+              <span className="text-muted">Total GCI</span>
+              <span className="font-semibold text-ink">{money(gci.totalGci)}</span>
+            </div>
+            {gci.rows.slice(0, 8).map((r) => (
+              <BarRow
+                key={r.agentId}
+                label={`${r.name} · ${r.deals} deal${r.deals === 1 ? "" : "s"}`}
+                value={r.gci}
+                max={Math.max(1, gci.rows[0].gci)}
+              />
+            ))}
+            {gci.unattributed > 0 && (
+              <p className="mt-2 text-xs text-muted">{money(gci.unattributed)} from deals with no main agent.</p>
+            )}
+          </>
+        )}
+      </Section>
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Section title="Agent leaderboard">
