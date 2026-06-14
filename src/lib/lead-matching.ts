@@ -1,5 +1,6 @@
 import type { Prisma, ListingType, PropertyType } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { notify } from "@/lib/activity";
 import { toNumber } from "@/lib/format";
 
 export interface PropertyMatch {
@@ -130,4 +131,150 @@ export async function findPropertyMatches(
     .filter((m) => m.score > 0)
     .sort((a, b) => b.score - a.score)
     .slice(0, take);
+}
+
+// ─────────────────────────────────────────── reverse: new-listing → leads
+
+export interface LeadMatch {
+  leadId: string;
+  agentId: string;
+  clientName: string | null;
+  score: number;
+  reasons: string[];
+}
+
+interface MatchableProperty {
+  companyId: string;
+  type: PropertyType;
+  area: string | null;
+  listingType: ListingType;
+  salePrice: Prisma.Decimal | number | null;
+  monthlyRent: Prisma.Decimal | number | null;
+}
+
+// Only alert on genuinely strong matches (≈ two full signals) so a new listing
+// doesn't spam every agent with a loosely-related lead.
+const NEW_LISTING_ALERT_THRESHOLD = 50;
+
+/**
+ * The inverse of findPropertyMatches: given a freshly-added property, find the
+ * ASSIGNED leads whose preferences it fits, using the same scoring weights.
+ * Returns only matches at or above the alert threshold, best first.
+ */
+export async function findLeadMatchesForProperty(
+  property: MatchableProperty,
+  take = 10,
+): Promise<LeadMatch[]> {
+  const price = toNumber(property.salePrice) || toNumber(property.monthlyRent);
+  const propArea = property.area?.trim().toLowerCase();
+
+  const leads = await prisma.lead.findMany({
+    where: {
+      companyId: property.companyId,
+      agentId: { not: null },
+      stage: { notIn: ["CLOSED_WON", "CLOSED_LOST"] },
+      // Cheap pre-filter: the lead either wants this type or has no type pref.
+      OR: [{ prefType: property.type }, { prefType: null }],
+    },
+    select: {
+      id: true,
+      agentId: true,
+      prefType: true,
+      prefArea: true,
+      budgetMin: true,
+      budgetMax: true,
+      client: { select: { name: true } },
+    },
+    take: 200,
+  });
+
+  const scored: LeadMatch[] = [];
+  for (const l of leads) {
+    const reasons: string[] = [];
+    let pts = 0;
+
+    if (l.prefType && l.prefType === property.type) {
+      pts += 30;
+      reasons.push("Type match");
+    }
+
+    const wantArea = l.prefArea?.trim().toLowerCase();
+    if (wantArea && propArea && propArea.includes(wantArea)) {
+      pts += 30;
+      reasons.push("Area match");
+    }
+
+    const min = l.budgetMin != null ? toNumber(l.budgetMin) : null;
+    const max = l.budgetMax != null ? toNumber(l.budgetMax) : null;
+    if (price > 0 && (min || max)) {
+      const lo = min ?? 0;
+      const hi = max ?? Number.POSITIVE_INFINITY;
+      if (price >= lo && price <= hi) {
+        pts += 30;
+        reasons.push("Within budget");
+      } else if (max && price <= max * 1.1) {
+        pts += 12;
+        reasons.push("Slightly above budget");
+      } else if (min && price >= min * 0.85) {
+        pts += 8;
+        reasons.push("Below typical budget");
+      }
+    }
+
+    const likelyIntent: ListingType | null =
+      max != null ? (max >= 10_000_000 ? "SALE" : "RENT") : null;
+    if (likelyIntent && (property.listingType === likelyIntent || property.listingType === "BOTH")) {
+      pts += 8;
+    }
+
+    const score = Math.min(100, pts);
+    if (score >= NEW_LISTING_ALERT_THRESHOLD) {
+      scored.push({ leadId: l.id, agentId: l.agentId!, clientName: l.client?.name ?? null, score, reasons });
+    }
+  }
+
+  return scored.sort((a, b) => b.score - a.score).slice(0, take);
+}
+
+/**
+ * Fire-and-forget: when a property is added, notify the agents of any active
+ * leads it strongly matches. Best-effort — swallows its own errors so it can't
+ * fail property creation. Only alerts for sellable inventory.
+ */
+export async function alertAgentsOfNewListing(propertyId: string): Promise<number> {
+  try {
+    const property = await prisma.property.findUnique({
+      where: { id: propertyId },
+      select: {
+        companyId: true,
+        title: true,
+        type: true,
+        area: true,
+        listingType: true,
+        salePrice: true,
+        monthlyRent: true,
+        status: true,
+      },
+    });
+    if (!property) return 0;
+    if (!["AVAILABLE", "UNDER_NEGOTIATION", "RESERVED"].includes(property.status)) return 0;
+
+    const matches = await findLeadMatchesForProperty(property);
+    await Promise.all(
+      matches.map((m) =>
+        notify({
+          companyId: property.companyId,
+          userId: m.agentId,
+          type: "GENERAL",
+          title: `New listing matches ${m.clientName ?? "a lead"}`,
+          body: `${property.title} fits their requirements (${m.reasons.join(", ")}).`,
+          link: `/leads/${m.leadId}`,
+        }),
+      ),
+    );
+    return matches.length;
+  } catch (err) {
+    console.error(`[lead-matching] alertAgentsOfNewListing ${propertyId} failed:`, err);
+    return 0;
+  }
 }

@@ -15,6 +15,7 @@ import { setFlash } from "@/lib/flash";
 import { canAddProperty } from "@/lib/plans";
 import { newShareSlug } from "@/lib/share";
 import { casUpdateGuarded } from "@/lib/concurrency";
+import { alertAgentsOfNewListing } from "@/lib/lead-matching";
 import { generatePropertyCopy } from "@/lib/ai/handlers/property-copy";
 
 // Empty form fields arrive as "" — treat those as "not provided" (→ undefined
@@ -146,6 +147,10 @@ export async function createProperty(_prev: FormState, formData: FormData): Prom
     entityId: property.id,
     summary: `Added property ${property.reference} — ${property.title}`,
   });
+
+  // Notify agents whose active leads strongly match this new listing.
+  // Best-effort (swallows its own errors) so it can't fail the create.
+  await alertAgentsOfNewListing(property.id);
 
   revalidatePath("/properties");
   redirect(`/properties/${property.id}`);
