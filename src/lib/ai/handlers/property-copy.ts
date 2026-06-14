@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { prisma } from "@/lib/prisma";
 import { AI_BUDGET } from "@/lib/ai/budget";
-import { isOpenAiConfigured, openaiChatJson } from "@/lib/ai/openai";
+import { isAiConfigured, aiComplete } from "@/lib/ai/provider";
 
 /**
  * Generate a listing TITLE + DESCRIPTION for the Add-property form from the
@@ -53,7 +53,7 @@ const TTL_MS = 10 * 60_000;
 
 export async function generatePropertyCopy(input: PropertyCopyInput): Promise<PropertyCopyResult> {
   // 1. Provider + master switch + plan-includes-AI gate.
-  if (!isOpenAiConfigured()) return { ok: false, reason: "AI features are not configured on this server." };
+  if (!isAiConfigured()) return { ok: false, reason: "AI features are not configured on this server." };
   const company = await prisma.company.findUnique({
     where: { id: input.companyId },
     select: { plan: true, aiEnabled: true },
@@ -108,14 +108,16 @@ export async function generatePropertyCopy(input: PropertyCopyInput): Promise<Pr
     }
   }
 
-  // 5. Call OpenAI.
+  // 5. Call the model (Anthropic or OpenAI — see lib/ai/provider.ts). JSON mode
+  //    on OpenAI; the SYSTEM prompt already instructs JSON-only either way.
   const context = Object.entries(inputs)
     .map(([k, v]) => `${k}: ${typeof v === "string" ? v : JSON.stringify(v)}`)
     .join("\n");
-  const res = await openaiChatJson({
+  const res = await aiComplete({
     system: SYSTEM,
     user: `Write a listing title and description for this property. Return JSON {title, description} only.\n\n<context>\n${context}\n</context>`,
     maxTokens: 500,
+    json: true,
   });
   if (!res.ok) return res;
 
@@ -131,7 +133,7 @@ export async function generatePropertyCopy(input: PropertyCopyInput): Promise<Pr
       inputHash,
       promptTokens: res.usage.promptTokens,
       completionTokens: res.usage.completionTokens,
-      cachedTokens: 0,
+      cachedTokens: res.usage.cachedTokens,
     },
   });
 

@@ -1,4 +1,4 @@
-import { getAiClient, AI_DEFAULTS } from "@/lib/ai/client";
+import { aiComplete } from "@/lib/ai/provider";
 
 /**
  * Phase-9 WhatsApp inbound classifier.
@@ -89,41 +89,21 @@ Never invent details not present in the message.`;
 export async function classifyInboundWhatsApp(
   text: string,
 ): Promise<WhatsAppClassification | null> {
-  const client = getAiClient();
-  if (!client) return null;
-
   const trimmed = text.slice(0, 800);
   if (!trimmed.trim()) return null;
 
-  let resp;
-  try {
-    resp = await client.messages.create({
-      ...AI_DEFAULTS,
-      max_tokens: 400,
-      system: [
-        { type: "text", text: SYSTEM, cache_control: { type: "ephemeral" } },
-      ],
-      messages: [
-        { role: "user", content: `Classify this inbound WhatsApp message:\n\n${trimmed}` },
-      ],
-    });
-  } catch {
-    // Webhook handlers must not throw — the caller logs the raw payload
-    // and continues. Returning null falls back to "unclassified inbound".
-    return null;
-  }
+  // Provider-agnostic JSON call (Anthropic or OpenAI — see lib/ai/provider.ts).
+  // Webhook handlers must not throw, and aiComplete never throws — it returns
+  // { ok: false } on any error, which we treat as "unclassified inbound".
+  const result = await aiComplete({
+    system: SYSTEM,
+    user: `Classify this inbound WhatsApp message:\n\n${trimmed}`,
+    maxTokens: 400,
+    json: true,
+  });
+  if (!result.ok || !result.text) return null;
 
-  // Walk the response content. Skip thinking blocks (the AI defaults
-  // enable adaptive thinking; on Opus 4.7 thinking content is omitted by
-  // default but on older models it may be present and we don't want to
-  // parse it as JSON).
-  const text_out = resp.content
-    .map((b) => (b.type === "text" ? b.text : ""))
-    .join("")
-    .trim();
-  if (!text_out) return null;
-
-  const parsed = tolerantJsonParse(text_out);
+  const parsed = tolerantJsonParse(result.text);
   if (!parsed || typeof parsed !== "object") return null;
 
   return validateClassification(parsed as Record<string, unknown>);

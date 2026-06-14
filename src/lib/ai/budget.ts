@@ -1,6 +1,6 @@
 import type { CompanyPlan } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { isAiConfigured } from "@/lib/ai/client";
+import { isAiConfigured } from "@/lib/ai/provider";
 
 /**
  * Per-plan AI call budget. FREE/TRIAL get zero so the feature is a real

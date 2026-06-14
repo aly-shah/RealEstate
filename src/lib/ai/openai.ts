@@ -20,10 +20,12 @@ export type OpenAiResult =
   | { ok: true; text: string; usage: { promptTokens: number; completionTokens: number } }
   | { ok: false; reason: string };
 
-export async function openaiChatJson(opts: {
+export async function openaiChat(opts: {
   system: string;
   user: string;
   maxTokens?: number;
+  /** Force a JSON-object response (response_format). Default false → plain text. */
+  json?: boolean;
 }): Promise<OpenAiResult> {
   const key = process.env.OPENAI_API_KEY;
   if (!key) return { ok: false, reason: "AI features are not configured on this server." };
@@ -37,7 +39,9 @@ export async function openaiChatJson(opts: {
         model: OPENAI_MODEL,
         max_tokens: opts.maxTokens ?? 500,
         temperature: 0.7,
-        response_format: { type: "json_object" },
+        // JSON mode requires the prompt to mention "JSON"; callers that pass
+        // json:true ensure their system prompt does.
+        ...(opts.json ? { response_format: { type: "json_object" } } : {}),
         messages: [
           { role: "system", content: opts.system },
           { role: "user", content: opts.user },
@@ -71,4 +75,9 @@ export async function openaiChatJson(opts: {
       completionTokens: data?.usage?.completion_tokens ?? 0,
     },
   };
+}
+
+/** Back-compat wrapper — JSON-forced chat (the original signature). */
+export function openaiChatJson(opts: { system: string; user: string; maxTokens?: number }): Promise<OpenAiResult> {
+  return openaiChat({ ...opts, json: true });
 }

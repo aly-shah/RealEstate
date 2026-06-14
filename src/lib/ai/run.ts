@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { AiSuggestionType } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { AI_DEFAULTS, getAiClient } from "@/lib/ai/client";
+import { aiComplete } from "@/lib/ai/provider";
 import { checkAiBudget } from "@/lib/ai/budget";
 
 /**
@@ -104,56 +104,25 @@ export async function runAi(input: AiCallInput): Promise<AiCallResult | AiCallFa
     };
   }
 
-  const client = getAiClient();
-  if (!client) return { ok: false, reason: "AI features are not configured on this server." };
+  // Provider-agnostic call (Anthropic or OpenAI — see lib/ai/provider.ts).
+  // Stable framing in `system`, volatile data in the user turn. These outputs
+  // are markdown/plain text, so no JSON mode.
+  const result = await aiComplete({
+    system: input.system,
+    user: `${input.prompt}\n\n<context>\n${stringifyInputs(input.inputs)}\n</context>`,
+    maxTokens: input.maxTokens ?? 800,
+    json: false,
+  });
+  if (!result.ok) return { ok: false, reason: result.reason };
 
-  let resp;
-  try {
-    resp = await client.messages.create({
-      ...AI_DEFAULTS,
-      max_tokens: input.maxTokens ?? AI_DEFAULTS.max_tokens,
-      // System prompt carries the cache breakpoint. Stable framing first,
-      // volatile content goes in the user turn — see shared/prompt-caching.md.
-      system: [
-        {
-          type: "text",
-          text: input.system,
-          cache_control: { type: "ephemeral" },
-        },
-      ],
-      messages: [
-        {
-          role: "user",
-          content: `${input.prompt}\n\n<context>\n${stringifyInputs(input.inputs)}\n</context>`,
-        },
-      ],
-    });
-  } catch (e) {
-    // Surface the Anthropic error message verbatim — most are
-    // operator-actionable (rate limit, invalid key, model overloaded).
-    const msg = e instanceof Error ? e.message.slice(0, 240) : "AI request failed.";
-    return { ok: false, reason: msg };
-  }
-
-  // Extract the text block. Opus 4.7 may emit a thinking block first when
-  // thinking content is opted into; we don't opt in, so the loop just
-  // walks past anything non-text without breaking.
-  const text = resp.content
-    .map((b) => (b.type === "text" ? b.text : ""))
-    .join("")
-    .trim();
-
+  const text = result.text;
   if (!text) return { ok: false, reason: "AI returned an empty response." };
 
   // Cap at 4KB so a runaway response can't blow up the row. The model is
   // told to be concise but the cap is a backstop.
   const content = text.length > 4_000 ? text.slice(0, 4_000) + "\n\n…(truncated)" : text;
 
-  const usage = {
-    promptTokens: resp.usage.input_tokens ?? 0,
-    completionTokens: resp.usage.output_tokens ?? 0,
-    cachedTokens: resp.usage.cache_read_input_tokens ?? 0,
-  };
+  const usage = result.usage;
 
   await prisma.aiSuggestion.create({
     data: {
