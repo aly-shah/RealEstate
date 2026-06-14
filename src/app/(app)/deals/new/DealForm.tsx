@@ -32,7 +32,7 @@ export function DealForm({ properties, clients, agents, dealers, rule }: DealFor
   const [mainAgentId, setMainAgentId] = useState("");
   const [coAgentIds, setCoAgentIds] = useState<string[]>([]);
   const [dealerId, setDealerId] = useState("");
-  const [commRate, setCommRate] = useState(2); // % of value, estimate only
+  const [commRate, setCommRate] = useState(2); // gross commission % — submitted + drives the preview
 
   const [state, action, pending] = useActionState<FormState, FormData>(createDeal, {});
 
@@ -132,6 +132,28 @@ export function DealForm({ properties, clients, agents, dealers, rule }: DealFor
               <div><label className="label" htmlFor="leaseMonths">Lease (months)</label><input id="leaseMonths" name="leaseMonths" type="number" min="0" className="field" defaultValue="12" /></div>
             </>
           )}
+          <div>
+            <label className="label" htmlFor="grossCommissionPercentage">Gross commission %</label>
+            <input
+              id="grossCommissionPercentage"
+              name="grossCommissionPercentage"
+              type="number"
+              min="0"
+              max="100"
+              step="0.1"
+              className="field"
+              value={commRate || ""}
+              onChange={(e) => setCommRate(Number(e.target.value))}
+            />
+            <p className="mt-1 text-xs text-muted">
+              Commission as a % of the {type === "SALE" ? "sale price" : "monthly rent"} — feeds the GCI &amp; forecast reports.
+            </p>
+          </div>
+          <div>
+            <label className="label" htmlFor="estimatedCloseDate">Estimated close date</label>
+            <input id="estimatedCloseDate" name="estimatedCloseDate" type="date" className="field" />
+            <p className="mt-1 text-xs text-muted">Optional — powers the &ldquo;next 90 days&rdquo; forecast.</p>
+          </div>
         </div>
       </div>
 
@@ -180,8 +202,8 @@ export function DealForm({ properties, clients, agents, dealers, rule }: DealFor
               <p className="text-xs text-muted">Based on the company default rule. Final figure is set when the deal closes.</p>
             </div>
             <label className="text-xs text-muted">
-              Est. rate
-              <input type="number" min="0" step="0.5" value={commRate} onChange={(e) => setCommRate(Number(e.target.value))} className="field ml-2 inline-block w-20 py-1" />%
+              Gross comm. %
+              <input type="number" min="0" max="100" step="0.5" value={commRate} onChange={(e) => setCommRate(Number(e.target.value))} className="field ml-2 inline-block w-20 py-1" />%
             </label>
           </div>
           {preview ? (

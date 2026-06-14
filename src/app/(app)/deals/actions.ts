@@ -25,6 +25,11 @@ const dealSchema = z.object({
   amount: z.coerce.number().nonnegative(),
   deposit: z.coerce.number().nonnegative().optional(),
   leaseMonths: z.coerce.number().int().nonnegative().optional(),
+  // GCI input — gross commission as a % of the deal value (drives the GCI +
+  // forecast reports). Optional; defaults to 0 when omitted.
+  grossCommissionPercentage: z.coerce.number().min(0).max(100).optional(),
+  // Forward-looking forecast date (YYYY-MM-DD from a date input).
+  estimatedCloseDate: z.string().optional(),
 });
 
 export type FormState = { error?: string; fieldErrors?: Record<string, string[]> };
@@ -62,6 +67,8 @@ export async function createDeal(_prev: FormState, formData: FormData): Promise<
     propertyId: d.propertyId,
     clientId: d.clientId || null,
     dealerId: d.dealerId || null,
+    grossCommissionPercentage: new Prisma.Decimal(d.grossCommissionPercentage ?? 0),
+    estimatedCloseDate: d.estimatedCloseDate ? new Date(d.estimatedCloseDate) : null,
     agents: { create: agentLinks },
     ...(d.type === "SALE"
       ? { sale: { create: { salePrice: new Prisma.Decimal(d.amount) } } }
