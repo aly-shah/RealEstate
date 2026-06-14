@@ -15,7 +15,7 @@ import {
   CreateInvoiceForm,
 } from "@/components/deal/DealControls";
 import { markPaymentPaid } from "@/app/(app)/payments/actions";
-import { startRentalContract } from "@/app/(app)/deals/actions";
+import { startRentalContract, updateDealForecast } from "@/app/(app)/deals/actions";
 import { WhatsAppButton } from "@/components/whatsapp/WhatsAppButton";
 import { TEMPLATES } from "@/lib/whatsapp";
 
@@ -222,6 +222,39 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
           {office && (
             <Section title="Deal status">
               <DealStatusChanger id={deal.id} current={deal.status} />
+            </Section>
+          )}
+
+          {office && (
+            <Section title="Forecast & GCI">
+              <form action={updateDealForecast} className="space-y-3">
+                <input type="hidden" name="id" value={deal.id} />
+                <div>
+                  <label className="label" htmlFor="grossCommissionPercentage">Gross commission %</label>
+                  <input
+                    id="grossCommissionPercentage"
+                    name="grossCommissionPercentage"
+                    type="number"
+                    min="0"
+                    max="100"
+                    step="0.1"
+                    className="field"
+                    defaultValue={toNumber(deal.grossCommissionPercentage) || ""}
+                  />
+                  <p className="mt-1 text-xs text-muted">% of the deal value — drives the GCI &amp; forecast reports.</p>
+                </div>
+                <div>
+                  <label className="label" htmlFor="estimatedCloseDate">Estimated close date</label>
+                  <input
+                    id="estimatedCloseDate"
+                    name="estimatedCloseDate"
+                    type="date"
+                    className="field"
+                    defaultValue={deal.estimatedCloseDate ? deal.estimatedCloseDate.toISOString().slice(0, 10) : ""}
+                  />
+                </div>
+                <button type="submit" className="btn-ghost w-full justify-center text-xs">Save</button>
+              </form>
             </Section>
           )}
 

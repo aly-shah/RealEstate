@@ -316,3 +316,55 @@ export async function startRentalContract(formData: FormData): Promise<void> {
   }
   revalidatePath(`/deals/${dealId}`);
 }
+
+const dealForecastSchema = z.object({
+  grossCommissionPercentage: z.coerce.number().min(0).max(100).optional(),
+  estimatedCloseDate: z.string().optional(),
+});
+
+/**
+ * Inline editor on the deal page — set/backfill the gross commission % and the
+ * estimated close date so existing deals feed the GCI + pipeline-forecast
+ * reports. Office-only (recordDeals), tenant-scoped. Invalidates the metrics
+ * cache so the dashboards/reports reflect it.
+ */
+export async function updateDealForecast(formData: FormData): Promise<void> {
+  const user = await requireCompanyUser();
+  if (!can(user.role, "recordDeals")) return;
+
+  const id = String(formData.get("id") || "");
+  if (!id) return;
+  const deal = await prisma.deal.findFirst({
+    where: { id, companyId: user.companyId },
+    select: { id: true, reference: true },
+  });
+  if (!deal) return;
+
+  const parsed = dealForecastSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) {
+    await setFlash({ tone: "danger", message: "Enter a gross commission % between 0 and 100." });
+    revalidatePath(`/deals/${id}`);
+    return;
+  }
+  const d = parsed.data;
+
+  await prisma.deal.update({
+    where: { id },
+    data: {
+      grossCommissionPercentage: new Prisma.Decimal(d.grossCommissionPercentage ?? 0),
+      estimatedCloseDate: d.estimatedCloseDate ? new Date(d.estimatedCloseDate) : null,
+    },
+  });
+  await logActivity({
+    companyId: user.companyId,
+    userId: user.id,
+    action: "deal.forecast_updated",
+    entityType: "DEAL",
+    entityId: id,
+    summary: `Updated gross commission % for ${deal.reference}`,
+    meta: { grossCommissionPercentage: d.grossCommissionPercentage ?? 0 },
+  });
+  invalidateCompanyMetrics(user.companyId);
+  await setFlash({ tone: "ok", message: "Saved." });
+  revalidatePath(`/deals/${id}`);
+}
