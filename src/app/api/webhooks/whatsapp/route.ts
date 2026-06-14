@@ -148,6 +148,8 @@ interface WaMessage {
   /** Meta's message id (`wamid....`) — stable, used as the idempotency key. */
   id?: string;
   from?: string;
+  /** Sender's WhatsApp profile display name, when Meta includes it in `contacts`. */
+  name?: string;
   text?: string;
   timestamp?: string;
   /**
@@ -188,6 +190,7 @@ function extractEvents(body: unknown): { messages: WaMessage[]; statuses: WaStat
       changes?: Array<{
         value?: {
           metadata?: { phone_number_id?: string };
+          contacts?: unknown[];
           messages?: unknown[];
           statuses?: unknown[];
         };
@@ -200,11 +203,19 @@ function extractEvents(body: unknown): { messages: WaMessage[]; statuses: WaStat
         typeof change.value?.metadata?.phone_number_id === "string"
           ? change.value.metadata.phone_number_id
           : undefined;
+      // Map each sender wa_id → their profile display name (sibling of messages).
+      const contactNames = new Map<string, string>();
+      for (const c of (change.value?.contacts ?? []) as Array<{ wa_id?: string; profile?: { name?: string } }>) {
+        if (typeof c.wa_id === "string" && typeof c.profile?.name === "string") {
+          contactNames.set(c.wa_id, c.profile.name);
+        }
+      }
       for (const msg of change.value?.messages ?? []) {
         const m = msg as { id?: string; from?: string; text?: { body?: string }; timestamp?: string };
         messages.push({
           id: typeof m.id === "string" ? m.id : undefined,
           from: typeof m.from === "string" ? m.from : undefined,
+          name: typeof m.from === "string" ? contactNames.get(m.from) : undefined,
           text: typeof m.text?.body === "string" ? m.text.body : undefined,
           timestamp: typeof m.timestamp === "string" ? m.timestamp : undefined,
           phoneNumberId,
