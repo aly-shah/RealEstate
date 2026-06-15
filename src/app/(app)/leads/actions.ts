@@ -336,3 +336,56 @@ export async function assignAgent(formData: FormData): Promise<void> {
   });
   revalidatePath(`/leads/${id}`);
 }
+
+/**
+ * Set or clear a client's marketing opt-out (DNC) from the lead page. Opting out
+ * stamps the source/time and exits the client's active drip sequences across all
+ * their leads; re-subscribing clears the flags. Gated by updateLeadsVisits +
+ * lead scope (an agent can only manage their own lead's client).
+ */
+export async function setClientConsent(formData: FormData): Promise<void> {
+  const user = await requireCompanyUser();
+  if (!can(user.role, "updateLeadsVisits")) return;
+
+  const leadId = String(formData.get("leadId") || "");
+  const optOut = String(formData.get("optOut")) === "true";
+  const lead = await prisma.lead.findFirst({
+    where: { id: leadId, companyId: user.companyId },
+    select: { id: true, clientId: true, agentId: true },
+  });
+  if (!lead || !lead.clientId) return;
+  if (user.role === "AGENT" && lead.agentId !== user.id) return; // own leads only
+
+  await prisma.client.update({
+    where: { id: lead.clientId },
+    data: {
+      marketingOptOut: optOut,
+      optOutAt: optOut ? new Date() : null,
+      optOutSource: optOut ? "manual" : null,
+    },
+  });
+
+  if (optOut) {
+    // Exit the client's active sequences across all their leads (leadId-indexed).
+    const leadIds = (
+      await prisma.lead.findMany({ where: { companyId: user.companyId, clientId: lead.clientId }, select: { id: true } })
+    ).map((l) => l.id);
+    if (leadIds.length > 0) {
+      await prisma.dripEnrollment.updateMany({
+        where: { leadId: { in: leadIds }, status: "ACTIVE" },
+        data: { status: "EXITED" },
+      });
+    }
+  }
+
+  await logActivity({
+    companyId: user.companyId,
+    userId: user.id,
+    action: optOut ? "client.opted_out" : "client.resubscribed",
+    entityType: "CLIENT",
+    entityId: lead.clientId,
+    summary: optOut ? "Client opted out of marketing (DNC)" : "Client re-subscribed to marketing",
+  });
+  await setFlash({ tone: "ok", message: optOut ? "Marked do-not-contact." : "Re-subscribed." });
+  revalidatePath(`/leads/${leadId}`);
+}

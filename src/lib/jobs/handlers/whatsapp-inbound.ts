@@ -199,7 +199,10 @@ async function handleOptOut(companyId: string, from: string): Promise<{ clientId
   });
   if (!client) return { clientId: null, exited: 0 };
 
-  await prisma.client.update({ where: { id: client.id }, data: { marketingOptOut: true } });
+  await prisma.client.update({
+    where: { id: client.id },
+    data: { marketingOptOut: true, optOutAt: new Date(), optOutSource: "WhatsApp STOP" },
+  });
 
   const leads = await prisma.lead.findMany({ where: { companyId, clientId: client.id }, select: { id: true } });
   let exited = 0;

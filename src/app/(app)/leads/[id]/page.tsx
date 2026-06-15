@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { requireCompanyUser } from "@/lib/session";
 import { can } from "@/lib/rbac";
-import { compactMoney, humanize, fmtDateTime } from "@/lib/format";
+import { compactMoney, humanize, fmtDateTime, fmtDate } from "@/lib/format";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Section } from "@/components/ui/Section";
 import { StatusBadge } from "@/components/ui/Badge";
@@ -21,6 +21,7 @@ import { MobileLeadActions } from "@/components/lead/MobileLeadActions";
 import { TEMPLATES } from "@/lib/whatsapp";
 import { LeadAiPanel } from "@/components/lead/LeadAiPanel";
 import { WhatsAppSend } from "@/components/lead/WhatsAppSend";
+import { setClientConsent } from "@/app/(app)/leads/actions";
 import { aiUsageSnapshot } from "@/lib/ai/budget";
 
 export default async function LeadDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -150,6 +151,8 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
   });
 
   const canAssign = can(user.role, "assignLeadsCalendars");
+  const canConsent = can(user.role, "updateLeadsVisits");
+  const optedOut = lead.client?.marketingOptOut ?? false;
 
   // Re-used between the header WhatsApp pill and the mobile action bar.
   const waMessage = TEMPLATES.newLeadFollowUp({
@@ -180,6 +183,12 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
           </div>
         }
       />
+
+      {optedOut && (
+        <p className="mb-4 rounded-xl border border-danger/30 bg-danger-bg px-3 py-2 text-sm text-danger">
+          🚫 <span className="font-semibold">Do-not-contact:</span> this client opted out of marketing. Automated sequences are paused — avoid promotional messages.
+        </p>
+      )}
 
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="space-y-6 lg:col-span-2">
@@ -263,6 +272,36 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
                     ))}
                   </ul>
                 </details>
+              )}
+            </Section>
+          )}
+
+          {canConsent && lead.clientId && (
+            <Section title="Consent">
+              {optedOut ? (
+                <>
+                  <p className="mb-2 rounded-xl border border-danger/30 bg-danger-bg px-3 py-2 text-xs text-danger">
+                    🚫 Do-not-contact — opted out of marketing
+                    {lead.client?.optOutSource ? ` (${lead.client.optOutSource})` : ""}
+                    {lead.client?.optOutAt ? ` on ${fmtDate(lead.client.optOutAt)}` : ""}. Automated sequences are paused.
+                  </p>
+                  <form action={setClientConsent}>
+                    <input type="hidden" name="leadId" value={lead.id} />
+                    <input type="hidden" name="optOut" value="false" />
+                    <button className="btn-ghost w-full justify-center text-xs">Re-subscribe</button>
+                  </form>
+                </>
+              ) : (
+                <>
+                  <p className="mb-2 text-xs text-muted">
+                    Receiving automated marketing (drip sequences). Mark do-not-contact if the client asks to stop.
+                  </p>
+                  <form action={setClientConsent}>
+                    <input type="hidden" name="leadId" value={lead.id} />
+                    <input type="hidden" name="optOut" value="true" />
+                    <button className="btn-ghost w-full justify-center text-xs text-danger">Mark do-not-contact</button>
+                  </form>
+                </>
               )}
             </Section>
           )}

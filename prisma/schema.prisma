@@ -684,10 +684,15 @@ model Client {
   // Which side of the market this contact represents. Drives CRM segmentation
   // and (future) type-aware matching. Defaults BUYER (the most common case).
   type        ClientType @default(BUYER)
-  // Marketing/automation opt-out. When true, drip sequences + other automated
-  // WhatsApp sends skip this contact (set on a "STOP" reply or manually).
+  // Marketing/automation opt-out (DNC). When true, MARKETING automation — drip
+  // sequences, promotional templates — skips this contact. Transactional sends
+  // (contract verification, receipts) are operational and not gated by this.
   // Default false = consented; proper opt-IN capture is a later hardening.
-  marketingOptOut Boolean @default(false)
+  marketingOptOut Boolean   @default(false)
+  // Audit: when the opt-out was set and where it came from
+  // ("WhatsApp STOP" | "manual" | "import"). Cleared on re-subscribe.
+  optOutAt        DateTime?
+  optOutSource    String?
   notes       String?
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @default(now()) @updatedAt
