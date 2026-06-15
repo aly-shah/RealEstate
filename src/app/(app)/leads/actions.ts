@@ -11,6 +11,7 @@ import { logActivity, notify } from "@/lib/activity";
 import { humanize } from "@/lib/format";
 import { scheduleAutoFollowUp } from "@/lib/lead-followups";
 import { routeForCompany } from "@/lib/lead-router";
+import { enrollLeadInSequences } from "@/lib/drip";
 import { setFlash } from "@/lib/flash";
 
 const leadSchema = z.object({
@@ -132,6 +133,9 @@ export async function createLead(_prev: FormState, formData: FormData): Promise<
     await routeForCompany(lead.id, user.companyId);
   }
 
+  // Enroll into any drip sequence triggered by the lead's starting stage.
+  await enrollLeadInSequences(lead.id);
+
   // Phase 4: auto-schedule the first follow-up. No-op when there's no agent
   // assigned yet (office can pick "Unassigned" — a later assignment will trigger).
   const followUpId = await scheduleAutoFollowUp({
@@ -187,6 +191,10 @@ export async function advanceStage(formData: FormData): Promise<void> {
       ...(stage === "CLOSED_LOST" && lostReason ? { lostReason } : {}),
     },
   });
+
+  // Enroll into any drip sequence triggered by the NEW stage (deduped per
+  // sequence). enrollLeadInSequences no-ops for the closed stages.
+  await enrollLeadInSequences(id);
 
   // Phase 4: when a lead progresses to CONTACTED or INTERESTED, ensure
   // there's a future follow-up on the calendar. The helper dedup-checks

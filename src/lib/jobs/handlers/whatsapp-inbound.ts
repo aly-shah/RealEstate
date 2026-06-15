@@ -4,6 +4,7 @@ import type { PropertyType } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { classifyInboundWhatsApp, type WhatsAppClassification } from "@/lib/ai/handlers/whatsapp-classify";
 import { routeForCompany } from "@/lib/lead-router";
+import { exitLeadFromSequences } from "@/lib/drip";
 import { normalizePhone } from "@/lib/whatsapp";
 import { logActivity } from "@/lib/activity";
 
@@ -31,12 +32,32 @@ const PROPERTY_TYPES = new Set<PropertyType>([
   "RESIDENTIAL", "COMMERCIAL", "PLOT", "APARTMENT", "VILLA", "SHOP", "OFFICE",
 ]);
 const CLOSED_STAGES = ["CLOSED_WON", "CLOSED_LOST"] as const;
+// Opt-out keywords (Meta also honours STOP at the platform level, but tracking
+// it ourselves lets the drip/automation gate respect it too).
+const OPT_OUT_RE = /^\s*(stop|unsubscribe|opt[\s-]?out|cancel)\s*$/i;
 
 export const whatsappInboundHandler: JobHandler = async ({ payload, companyId }) => {
   const p = (payload ?? {}) as Record<string, unknown>;
   const from = typeof p.from === "string" ? p.from.slice(0, 40) : null;
   const profileName = typeof p.name === "string" ? p.name.slice(0, 120) : null;
   const text = typeof p.text === "string" ? p.text.slice(0, 1_000) : null;
+
+  // Opt-out: a bare "STOP" → flag the client + exit their drip sequences, and
+  // do NOT capture it as a new lead.
+  if (companyId && from && text && OPT_OUT_RE.test(text)) {
+    const handled = await handleOptOut(companyId, from);
+    await prisma.activityLog.create({
+      data: {
+        companyId,
+        action: "whatsapp.opt_out",
+        entityType: handled.clientId ? "CLIENT" : "WHATSAPP",
+        entityId: handled.clientId,
+        summary: `Opt-out from ${from}${handled.clientId ? "" : " (no matching client)"}`,
+        meta: { from, text, exitedSequences: handled.exited } as unknown as Prisma.InputJsonObject,
+      },
+    });
+    return { handled: true, from, optOut: true, exitedSequences: handled.exited };
+  }
 
   // Classify if we have text and a model. classifyInboundWhatsApp is
   // fail-safe — returns null when ANTHROPIC_API_KEY is missing or the
@@ -159,6 +180,31 @@ async function captureLead(input: {
   await routeForCompany(lead.id, companyId);
 
   return { leadId: lead.id, created: true };
+}
+
+/**
+ * Flag the matching client as opted-out and exit their active drip sequences.
+ * Matches on the same phone variants as captureLead. No-op when no client
+ * matches (e.g. a stranger texting STOP).
+ */
+async function handleOptOut(companyId: string, from: string): Promise<{ clientId: string | null; exited: number }> {
+  const canonical = normalizePhone(from) ?? from;
+  const localZero = canonical.startsWith("92") ? `0${canonical.slice(2)}` : canonical;
+  const phoneVariants = [...new Set([from, canonical, localZero])];
+
+  const client = await prisma.client.findFirst({
+    where: { companyId, phone: { in: phoneVariants } },
+    orderBy: { createdAt: "desc" },
+    select: { id: true },
+  });
+  if (!client) return { clientId: null, exited: 0 };
+
+  await prisma.client.update({ where: { id: client.id }, data: { marketingOptOut: true } });
+
+  const leads = await prisma.lead.findMany({ where: { companyId, clientId: client.id }, select: { id: true } });
+  let exited = 0;
+  for (const l of leads) exited += await exitLeadFromSequences(l.id);
+  return { clientId: client.id, exited };
 }
 
 function buildSummary(input: {

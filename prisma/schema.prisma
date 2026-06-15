@@ -442,6 +442,8 @@ model Company {
   idempotencyKeys IdempotencyKey[]
   propertyViews   PropertyView[]
   contracts       Contract[]
+  dripSequences   DripSequence[]
+  dripEnrollments DripEnrollment[]
 }
 
 model User {
@@ -679,6 +681,10 @@ model Client {
   // Which side of the market this contact represents. Drives CRM segmentation
   // and (future) type-aware matching. Defaults BUYER (the most common case).
   type        ClientType @default(BUYER)
+  // Marketing/automation opt-out. When true, drip sequences + other automated
+  // WhatsApp sends skip this contact (set on a "STOP" reply or manually).
+  // Default false = consented; proper opt-IN capture is a later hardening.
+  marketingOptOut Boolean @default(false)
   notes       String?
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @default(now()) @updatedAt
@@ -743,6 +749,7 @@ model Lead {
   events    CalendarEvent[]
   deals     Deal[]
   showings  Showing[]
+  dripEnrollments DripEnrollment[]
 
   @@index([companyId])
   @@index([agentId])
@@ -1396,6 +1403,81 @@ model WhatsAppAutomation {
   // One mapping per event per tenant; the companyId-leading unique also serves
   // tenant lookups + the cascade, so no separate @@index is needed.
   @@unique([companyId, event])
+}
+
+// ─────────────────────────────────────────────────────────── Drip sequences
+
+enum DripStepKind {
+  // Send an approved WhatsApp template to the lead's client.
+  WHATSAPP_TEMPLATE
+  // Create a follow-up task (CalendarEvent) for the lead's agent.
+  TASK
+}
+
+enum DripEnrollmentStatus {
+  ACTIVE
+  COMPLETED
+  // Left early — lead closed, or the client opted out / was removed.
+  EXITED
+}
+
+// A reusable multi-step nurture sequence. Leads auto-enroll when they ENTER
+// triggerStage (null = manual-only). Runs on the job tick (lib/drip.ts).
+model DripSequence {
+  id           String     @id @default(cuid())
+  companyId    String
+  company      Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name         String
+  triggerStage LeadStage?
+  active       Boolean    @default(true)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @default(now()) @updatedAt
+
+  steps       DripStep[]
+  enrollments DripEnrollment[]
+
+  @@index([companyId])
+}
+
+model DripStep {
+  id           String       @id @default(cuid())
+  sequenceId   String
+  sequence     DripSequence @relation(fields: [sequenceId], references: [id], onDelete: Cascade)
+  // 0-based position in the sequence.
+  order        Int
+  kind         DripStepKind
+  // Hours to wait before running this step — measured from enrollment for the
+  // first step, then from the previous step.
+  delayHours   Int          @default(24)
+  // WHATSAPP_TEMPLATE: the approved template name + language (body param {{1}}
+  // is filled with the client's name).
+  templateName String?
+  templateLang String?
+  // TASK: the follow-up title.
+  taskTitle    String?
+
+  @@index([sequenceId])
+}
+
+// One lead's run through one sequence. nextRunAt is when the currentStep is due.
+model DripEnrollment {
+  id          String               @id @default(cuid())
+  companyId   String
+  company     Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  sequenceId  String
+  sequence    DripSequence         @relation(fields: [sequenceId], references: [id], onDelete: Cascade)
+  leadId      String
+  lead        Lead                 @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  status      DripEnrollmentStatus @default(ACTIVE)
+  currentStep Int                  @default(0)
+  nextRunAt   DateTime
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @default(now()) @updatedAt
+
+  // One active run per lead per sequence.
+  @@unique([sequenceId, leadId])
+  // Runner sweep: due ACTIVE enrollments across all tenants (like the Job queue).
+  @@index([status, nextRunAt])
 }
 
 // "Sync templates" button in Settings → Integrations; refreshed on

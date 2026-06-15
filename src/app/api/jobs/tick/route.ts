@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { timingSafeEqual } from "node:crypto";
 import { runDueJobs } from "@/lib/jobs/runner";
+import { runDripEnrollments } from "@/lib/drip";
 import {
   sweepExpiredTrials,
   sweepStuckJobs,
@@ -58,6 +59,9 @@ export async function POST(req: NextRequest) {
   const reaper = await sweepStuckJobs();
   const sweep = await sweepExpiredTrials();
   const queue = await runDueJobs();
+  // Drip sequences are time-sensitive (hour-granularity), so run every tick
+  // rather than on the daily throttle. Bounded per run.
+  const drips = await runDripEnrollments();
 
   let purge: Awaited<ReturnType<typeof purgeOldRows>> | null = null;
   let waProbe: Awaited<ReturnType<typeof sweepWhatsAppTokens>> | null = null;
@@ -87,6 +91,7 @@ export async function POST(req: NextRequest) {
     reaper,
     sweep,
     queue,
+    drips,
     purge,
     waProbe,
     waCatalog,
