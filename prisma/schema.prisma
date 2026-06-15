@@ -912,6 +912,7 @@ model Deal {
   commission Commission?
   documents  Document[]
   contract   Contract?
+  checklist  DealChecklistItem[]
 
   @@unique([companyId, reference])
   @@index([companyId])
@@ -936,6 +937,26 @@ model DealAgent {
 
   @@id([dealId, agentId])
   @@index([agentId])
+}
+
+// Per-deal closing checklist — required documents/milestones that must be
+// completed before the deal can be marked CLOSED_WON (the compliance gate in
+// setDealStatus). Seeded with a default set per deal type on creation; the
+// office can add/remove items. Items are checked off manually for v1 (linking
+// each to a verified Document is a later enhancement).
+model DealChecklistItem {
+  id        String    @id @default(cuid())
+  dealId    String
+  deal      Deal      @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  label     String
+  required  Boolean   @default(true)
+  done      Boolean   @default(false)
+  doneAt    DateTime?
+  order     Int       @default(0)
+  createdAt DateTime  @default(now())
+
+  // Deal detail page lists items by dealId; also serves the deal-delete cascade.
+  @@index([dealId])
 }
 
 model Sale {

@@ -36,6 +36,26 @@ export type FormState = { error?: string; fieldErrors?: Record<string, string[]>
 
 const dec = (v?: number) => (v === undefined || Number.isNaN(v) ? null : new Prisma.Decimal(v));
 
+// Default closing-checklist items per deal type. Required items must be done
+// before the deal can be marked CLOSED_WON (the compliance gate in setDealStatus).
+const DEFAULT_CHECKLIST: Record<"SALE" | "RENTAL", { label: string; required: boolean }[]> = {
+  SALE: [
+    { label: "Buyer CNIC", required: true },
+    { label: "Seller CNIC", required: true },
+    { label: "Ownership / title document", required: true },
+    { label: "Sale agreement signed", required: true },
+    { label: "Transfer / NOC documents", required: true },
+    { label: "Booking / token receipt", required: false },
+  ],
+  RENTAL: [
+    { label: "Tenant CNIC", required: true },
+    { label: "Owner CNIC", required: true },
+    { label: "Rental agreement signed", required: true },
+    { label: "Security deposit received", required: true },
+    { label: "Guarantor details", required: false },
+  ],
+};
+
 // nextDealRef removed — superseded by lib/refs.ts:nextDealReference, which
 // uses Company.refPrefix so each tenant gets distinguishable references
 // (`CHR-D-0001` vs `UEP-D-0001`) instead of every tenant starting at DEAL-0001.
@@ -70,6 +90,9 @@ export async function createDeal(_prev: FormState, formData: FormData): Promise<
     grossCommissionPercentage: new Prisma.Decimal(d.grossCommissionPercentage ?? 0),
     estimatedCloseDate: d.estimatedCloseDate ? new Date(d.estimatedCloseDate) : null,
     agents: { create: agentLinks },
+    // Seed the default closing checklist for the deal type — the office can
+    // adjust it; required items gate CLOSED_WON (see setDealStatus).
+    checklist: { create: DEFAULT_CHECKLIST[d.type].map((it, i) => ({ ...it, order: i })) },
     ...(d.type === "SALE"
       ? { sale: { create: { salePrice: new Prisma.Decimal(d.amount) } } }
       : {
@@ -126,6 +149,23 @@ export async function setDealStatus(formData: FormData): Promise<void> {
   // Hard-require a reason on CLOSED_LOST. HTML5 `required` on the input is
   // the primary UX; this is the server-side backstop.
   if (status === "CLOSED_LOST" && !lostReason) return;
+
+  // Compliance gate: a deal can't be CLOSED_WON while required checklist items
+  // are still pending. This is the server-side enforcement — the deal page also
+  // shows the blocker and disables the control.
+  if (status === "CLOSED_WON") {
+    const pending = await prisma.dealChecklistItem.count({
+      where: { dealId: id, required: true, done: false },
+    });
+    if (pending > 0) {
+      await setFlash({
+        tone: "danger",
+        message: `Can't close — ${pending} required checklist item${pending === 1 ? "" : "s"} still pending.`,
+      });
+      revalidatePath(`/deals/${id}`);
+      return;
+    }
+  }
 
   const isClosed = status === "CLOSED_WON" || status === "CLOSED_LOST";
   await prisma.deal.update({
@@ -367,4 +407,54 @@ export async function updateDealForecast(formData: FormData): Promise<void> {
   invalidateCompanyMetrics(user.companyId);
   await setFlash({ tone: "ok", message: "Saved." });
   revalidatePath(`/deals/${id}`);
+}
+
+/** Toggle a checklist item done/undone. recordDeals-gated, tenant-scoped. */
+export async function toggleChecklistItem(formData: FormData): Promise<void> {
+  const user = await requireCompanyUser();
+  if (!can(user.role, "recordDeals")) return;
+  const id = String(formData.get("id") || "");
+  const item = await prisma.dealChecklistItem.findFirst({
+    where: { id, deal: { companyId: user.companyId } },
+    select: { id: true, done: true, dealId: true },
+  });
+  if (!item) return;
+  await prisma.dealChecklistItem.update({
+    where: { id },
+    data: { done: !item.done, doneAt: !item.done ? new Date() : null },
+  });
+  revalidatePath(`/deals/${item.dealId}`);
+}
+
+/** Add a custom checklist item to a deal. */
+export async function addChecklistItem(formData: FormData): Promise<void> {
+  const user = await requireCompanyUser();
+  if (!can(user.role, "recordDeals")) return;
+  const dealId = String(formData.get("dealId") || "");
+  const label = String(formData.get("label") || "").trim();
+  if (!label) return;
+  const required = formData.get("required") === "on" || formData.get("required") === "true";
+  const deal = await prisma.deal.findFirst({
+    where: { id: dealId, companyId: user.companyId },
+    select: { id: true, _count: { select: { checklist: true } } },
+  });
+  if (!deal) return;
+  await prisma.dealChecklistItem.create({
+    data: { dealId, label: label.slice(0, 200), required, order: deal._count.checklist },
+  });
+  revalidatePath(`/deals/${dealId}`);
+}
+
+/** Remove a checklist item. */
+export async function deleteChecklistItem(formData: FormData): Promise<void> {
+  const user = await requireCompanyUser();
+  if (!can(user.role, "recordDeals")) return;
+  const id = String(formData.get("id") || "");
+  const item = await prisma.dealChecklistItem.findFirst({
+    where: { id, deal: { companyId: user.companyId } },
+    select: { id: true, dealId: true },
+  });
+  if (!item) return;
+  await prisma.dealChecklistItem.delete({ where: { id } });
+  revalidatePath(`/deals/${item.dealId}`);
 }

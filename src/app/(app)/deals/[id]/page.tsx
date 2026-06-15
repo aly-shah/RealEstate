@@ -15,7 +15,13 @@ import {
   CreateInvoiceForm,
 } from "@/components/deal/DealControls";
 import { markPaymentPaid } from "@/app/(app)/payments/actions";
-import { startRentalContract, updateDealForecast } from "@/app/(app)/deals/actions";
+import {
+  startRentalContract,
+  updateDealForecast,
+  toggleChecklistItem,
+  addChecklistItem,
+  deleteChecklistItem,
+} from "@/app/(app)/deals/actions";
 import { WhatsAppButton } from "@/components/whatsapp/WhatsAppButton";
 import { TEMPLATES } from "@/lib/whatsapp";
 
@@ -45,6 +51,7 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
       payments: { orderBy: { createdAt: "asc" } },
       commission: { include: { shares: true } },
       documents: true,
+      checklist: { orderBy: { order: "asc" } },
       // Only the fields the lease-verification panel renders — never pull the
       // raw CNIC numbers into the page.
       contract: { select: { id: true, status: true, landlordVerifiedAt: true, renterVerifiedAt: true } },
@@ -69,6 +76,11 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
   const suggestedComm = Math.round(value * 0.02);
   const now = new Date();
   const canBill = can(user.role, "managePayments");
+
+  // Closing-checklist readiness — required items still pending block CLOSED_WON.
+  const checklistDone = deal.checklist.filter((c) => c.done).length;
+  const requiredPending = deal.checklist.filter((c) => c.required && !c.done).length;
+  const isDealClosed = deal.status === "CLOSED_WON" || deal.status === "CLOSED_LOST";
 
   return (
     <div>
@@ -216,6 +228,65 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
               <p className="text-sm text-muted">Commission is generated once the deal is closed-won.</p>
             )}
           </Section>
+
+          {office && (
+            <Section
+              title="Closing checklist"
+              action={
+                <span className="text-xs text-muted">{checklistDone}/{deal.checklist.length} done</span>
+              }
+            >
+              {!isDealClosed && requiredPending > 0 && (
+                <p className="mb-3 rounded-xl border border-warn/30 bg-warn-bg px-3 py-2 text-xs text-warn">
+                  {requiredPending} required item{requiredPending === 1 ? "" : "s"} pending — the deal can&rsquo;t be closed-won until these are done.
+                </p>
+              )}
+              {!isDealClosed && deal.checklist.length > 0 && requiredPending === 0 && (
+                <p className="mb-3 rounded-xl border border-ok/30 bg-ok-bg px-3 py-2 text-xs text-ok">
+                  All required items complete — ready to close.
+                </p>
+              )}
+              {deal.checklist.length === 0 ? (
+                <p className="mb-3 text-sm text-muted">No checklist items.</p>
+              ) : (
+                <ul className="mb-3 divide-y divide-line">
+                  {deal.checklist.map((item) => (
+                    <li key={item.id} className="flex items-center justify-between gap-3 py-2 text-sm">
+                      <form action={toggleChecklistItem} className="flex min-w-0 items-center gap-2">
+                        <input type="hidden" name="id" value={item.id} />
+                        <button
+                          type="submit"
+                          aria-label={item.done ? "Mark not done" : "Mark done"}
+                          className={`grid h-5 w-5 shrink-0 place-items-center rounded border text-xs ${
+                            item.done ? "border-ok bg-ok text-white" : "border-line bg-paper text-transparent hover:border-accent"
+                          }`}
+                        >
+                          ✓
+                        </button>
+                        <span className={`truncate ${item.done ? "text-muted line-through" : "text-ink"}`}>
+                          {item.label}
+                          {item.required && <span className="ml-1 text-xs text-danger">*</span>}
+                        </span>
+                      </form>
+                      <form action={deleteChecklistItem}>
+                        <input type="hidden" name="id" value={item.id} />
+                        <button className="btn-ghost px-2 py-0.5 text-xs text-muted" aria-label="Remove item">✕</button>
+                      </form>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <form action={addChecklistItem} className="flex flex-wrap items-end gap-2">
+                <input type="hidden" name="dealId" value={deal.id} />
+                <input name="label" className="field flex-1 min-w-[12rem]" placeholder="Add an item…" required />
+                <label className="flex items-center gap-1 text-xs text-muted">
+                  <input type="checkbox" name="required" defaultChecked className="accent-ink" /> Required
+                </label>
+                <button className="btn-ghost text-xs">+ Add</button>
+              </form>
+              <p className="mt-2 text-xs text-muted"><span className="text-danger">*</span> required to close. Items are checked off manually.</p>
+            </Section>
+          )}
         </div>
 
         <div className="space-y-6 right-rail">
