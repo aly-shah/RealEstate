@@ -389,3 +389,52 @@ export async function updateLeadRouting(_prev: FormState, formData: FormData): P
   revalidatePath("/settings");
   return { ok: true };
 }
+
+const automationSchema = z.object({
+  event: z.enum(["CONTRACT_VERIFY"]),
+  // "name|language" of an approved template, or "" to turn the automation off.
+  template: z.string(),
+});
+
+/**
+ * Map (or clear) the approved WhatsApp template used for an automation event.
+ * Owner-only. Validates the chosen template is APPROVED + belongs to the tenant
+ * so a stale/foreign name can't be wired in.
+ */
+export async function updateWhatsappAutomation(_prev: FormState, formData: FormData): Promise<FormState> {
+  const user = await requireCompanyUser();
+  if (user.role !== "OWNER") return { error: "Only the company owner can configure this." };
+
+  const parsed = automationSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { error: "Invalid selection." };
+  const { event, template } = parsed.data;
+
+  if (!template) {
+    await prisma.whatsAppAutomation.deleteMany({ where: { companyId: user.companyId, event } });
+  } else {
+    const [templateName, language] = template.split("|");
+    if (!templateName || !language) return { error: "Invalid template." };
+    const tpl = await prisma.whatsAppTemplate.findFirst({
+      where: { companyId: user.companyId, name: templateName, language, status: "APPROVED" },
+      select: { id: true },
+    });
+    if (!tpl) return { error: "Pick an approved template." };
+    await prisma.whatsAppAutomation.upsert({
+      where: { companyId_event: { companyId: user.companyId, event } },
+      create: { companyId: user.companyId, event, templateName, language },
+      update: { templateName, language },
+    });
+  }
+
+  await logActivity({
+    companyId: user.companyId,
+    userId: user.id,
+    action: "company.wa_automation_updated",
+    entityType: "COMPANY",
+    entityId: user.companyId,
+    summary: `WhatsApp automation: ${event} → ${template || "off"}`,
+  });
+  await setFlash({ tone: "ok", message: "WhatsApp automation saved." });
+  revalidatePath("/settings");
+  return { ok: true };
+}

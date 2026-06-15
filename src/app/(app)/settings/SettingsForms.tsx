@@ -8,6 +8,7 @@ import {
   updateCompanyBranding,
   updateIntegrations,
   updateLeadRouting,
+  updateWhatsappAutomation,
   type FormState,
 } from "./actions";
 import { syncWhatsappTemplates } from "./whatsapp-actions";
@@ -18,6 +19,46 @@ const ROUTING_OPTIONS = [
   { value: "TERRITORY_MATCH", label: "Territory match — prefer an agent who's closed in the area" },
   { value: "SHARK_TANK", label: "Shark tank — alert all agents to claim the lead" },
 ] as const;
+
+/** Map the approved WhatsApp template used for automated contract-verify sends. */
+export function WhatsappAutomationForm({
+  approved,
+  current,
+}: {
+  approved: { name: string; language: string }[];
+  current: { templateName: string; language: string } | null;
+}) {
+  const [state, action, pending] = useActionState<FormState, FormData>(updateWhatsappAutomation, {});
+  const currentValue = current ? `${current.templateName}|${current.language}` : "";
+
+  return (
+    <form action={action} className="space-y-3">
+      <input type="hidden" name="event" value="CONTRACT_VERIFY" />
+      <div className="max-w-xl">
+        <label className="label" htmlFor="template">Contract verification template</label>
+        <select id="template" name="template" defaultValue={currentValue} className="field">
+          <option value="">— Off (free-form within 24h / share links manually) —</option>
+          {approved.map((t) => (
+            <option key={`${t.name}|${t.language}`} value={`${t.name}|${t.language}`}>
+              {t.name} ({t.language})
+            </option>
+          ))}
+        </select>
+        <p className="mt-1 text-xs text-muted">
+          The approved template sent to the landlord &amp; renter for CNIC verification — the only way
+          to deliver outside WhatsApp&rsquo;s 24-hour window. Body params fill in order:{" "}
+          <code className="kbd">{"{{1}}"}</code> recipient name, <code className="kbd">{"{{2}}"}</code> property,{" "}
+          <code className="kbd">{"{{3}}"}</code> verify link.
+          {approved.length === 0 && " No approved templates yet — sync them above first."}
+        </p>
+      </div>
+      {state.error && <p className="text-xs text-danger">{state.error}</p>}
+      <button type="submit" disabled={pending} className="btn-accent">
+        {pending ? "Saving…" : "Save automation"}
+      </button>
+    </form>
+  );
+}
 
 /** Company auto lead-routing strategy for incoming unassigned leads. */
 export function LeadRoutingForm({ strategy }: { strategy: string }) {

@@ -14,6 +14,7 @@ import {
   IntegrationsForm,
   LeadRoutingForm,
   WhatsappTemplatesPanel,
+  WhatsappAutomationForm,
 } from "./SettingsForms";
 import { setUserStatus } from "./actions";
 import { planUsageSnapshot } from "@/lib/plans";
@@ -45,7 +46,7 @@ export default async function SettingsPage() {
   const user = await requireCapability("manageUsers");
   const companyId = user.companyId!;
 
-  const [users, rule, company, usage, ai, templates] = await Promise.all([
+  const [users, rule, company, usage, ai, templates, contractAutomation] = await Promise.all([
     prisma.user.findMany({ where: { companyId }, orderBy: { createdAt: "asc" } }),
     prisma.commissionRule.findFirst({ where: { companyId, isDefault: true } }),
     prisma.company.findUnique({
@@ -71,6 +72,10 @@ export default async function SettingsPage() {
         id: true, name: true, language: true, category: true,
         status: true, paramCount: true, bodyText: true, syncedAt: true,
       },
+    }),
+    prisma.whatsAppAutomation.findUnique({
+      where: { companyId_event: { companyId, event: "CONTRACT_VERIFY" } },
+      select: { templateName: true, language: true },
     }),
   ]);
 
@@ -169,6 +174,19 @@ export default async function SettingsPage() {
           <WhatsappTemplatesPanel
             templates={templates}
             canSync={!!company.whatsappBusinessAccountId && !!company.whatsappAccessToken}
+          />
+        </Section>
+      )}
+
+      {user.role === "OWNER" && company && (
+        <Section title="WhatsApp automation">
+          <p className="mb-4 text-sm text-muted">
+            Map an approved template to an automated message so it delivers over WhatsApp even
+            outside the 24-hour window.
+          </p>
+          <WhatsappAutomationForm
+            approved={templates.filter((t) => t.status === "APPROVED").map((t) => ({ name: t.name, language: t.language }))}
+            current={contractAutomation}
           />
         </Section>
       )}

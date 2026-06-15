@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { sendWhatsAppText } from "@/lib/wa-business";
+import { sendAutomationTemplate } from "@/lib/wa-automation";
 import { decryptSecret } from "@/lib/crypto";
 
 /**
@@ -79,39 +80,63 @@ export async function initiateContractPipelines(dealId: string): Promise<Contrac
     warnings.push("WhatsApp isn't configured for this company — share the links manually.");
   }
 
+  // Per-party send: try the company's approved CONTRACT_VERIFY template first
+  // (the ONLY thing that delivers outside Meta's 24h window — the whole point
+  // for a cold contract link), then fall back to free-form text inside the
+  // window, then leave the link for manual sharing. Template body params are
+  // positional: {{1}} recipient name, {{2}} property title, {{3}} verify link.
+  const sendLink = async (
+    party: "Landlord" | "Renter",
+    phone: string,
+    name: string,
+    link: string,
+    fallbackBody: string,
+  ): Promise<boolean> => {
+    const tpl = await sendAutomationTemplate({
+      companyId: deal.companyId,
+      event: "CONTRACT_VERIFY",
+      toPhone: phone,
+      bodyParams: [name, deal.property.title, link],
+    });
+    if (tpl.ok) return true;
+    // A configured mapping that failed is a real error worth surfacing; an
+    // unconfigured one just means "no template yet" → try free-form.
+    if (tpl.configured) warnings.push(`${party} template send failed (${tpl.reason}).`);
+    if (waReady) {
+      const r = await sendWhatsAppText({ phoneNumberId: phoneNumberId!, accessToken: accessToken!, toPhone: phone, body: fallbackBody });
+      if (r.ok) return true;
+      warnings.push(`${party} WhatsApp not delivered (${r.error}).`);
+    }
+    return false;
+  };
+
   let landlordSent = false;
   let renterSent = false;
 
-  // Landlord link.
   if (!deal.property.ownerPhone) {
     warnings.push("No landlord phone on the property — landlord link not sent.");
-  } else if (waReady) {
-    const r = await sendWhatsAppText({
-      phoneNumberId: phoneNumberId!,
-      accessToken: accessToken!,
-      toPhone: deal.property.ownerPhone,
-      body:
-        `Assalam-o-Alaikum,\n\nTo complete the lease for "${deal.property.title}", please tap this secure link ` +
+  } else {
+    landlordSent = await sendLink(
+      "Landlord",
+      deal.property.ownerPhone,
+      deal.property.ownerName ?? "there",
+      landlordLink,
+      `Assalam-o-Alaikum,\n\nTo complete the lease for "${deal.property.title}", please tap this secure link ` +
         `and photograph your CNIC for verification:\n\n${landlordLink}`,
-    });
-    landlordSent = r.ok;
-    if (!r.ok) warnings.push(`Landlord WhatsApp not delivered (${r.error}).`);
+    );
   }
 
-  // Renter link.
   if (!deal.client?.phone) {
     warnings.push("No renter phone on the client — renter link not sent.");
-  } else if (waReady) {
-    const r = await sendWhatsAppText({
-      phoneNumberId: phoneNumberId!,
-      accessToken: accessToken!,
-      toPhone: deal.client.phone,
-      body:
-        `Assalam-o-Alaikum,\n\nTo complete your rental lease verification, please tap this secure link ` +
+  } else {
+    renterSent = await sendLink(
+      "Renter",
+      deal.client.phone,
+      deal.client.name ?? "there",
+      renterLink,
+      `Assalam-o-Alaikum,\n\nTo complete your rental lease verification, please tap this secure link ` +
         `and photograph your CNIC:\n\n${renterLink}`,
-    });
-    renterSent = r.ok;
-    if (!r.ok) warnings.push(`Renter WhatsApp not delivered (${r.error}).`);
+    );
   }
 
   return { contractId: contract.id, landlordLink, renterLink, landlordSent, renterSent, warnings };

@@ -438,6 +438,7 @@ model Company {
   notifications   Notification[]
   aiSuggestions   AiSuggestion[]
   whatsappTemplates WhatsAppTemplate[]
+  whatsappAutomations WhatsAppAutomation[]
   idempotencyKeys IdempotencyKey[]
   propertyViews   PropertyView[]
   contracts       Contract[]
@@ -1368,6 +1369,35 @@ model AiSuggestion {
 // Phase-9.5 risk fix — local mirror of the tenant's Meta-approved
 // WhatsApp message templates. Synced from
 // GET /v21.0/<whatsappBusinessAccountId>/message_templates via the
+// Automated-message events that can be delivered through a Meta-approved
+// template (vs. free-form text, which Meta only allows inside the 24h
+// customer-service window). Keep narrow; each value is wired to a producer.
+enum WaAutomationEvent {
+  // Rental-contract CNIC verification link sent to landlord + renter.
+  CONTRACT_VERIFY
+}
+
+// Per-company mapping of an automation event → which approved WhatsApp template
+// to send for it. Without a row, the producer falls back to its prior behaviour
+// (free-form text inside the 24h window, or returning a link to share manually).
+// The template's body params are filled positionally by the producer; the
+// expected order is documented per-event in the Settings UI.
+model WhatsAppAutomation {
+  id           String            @id @default(cuid())
+  companyId    String
+  company      Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  event        WaAutomationEvent
+  // Meta template name + language (from the synced WhatsAppTemplate catalog).
+  templateName String
+  language     String
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @default(now()) @updatedAt
+
+  // One mapping per event per tenant; the companyId-leading unique also serves
+  // tenant lookups + the cascade, so no separate @@index is needed.
+  @@unique([companyId, event])
+}
+
 // "Sync templates" button in Settings → Integrations; refreshed on
 // demand (we don't poll, owners curate templates rarely).
 //
