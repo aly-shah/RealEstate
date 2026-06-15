@@ -693,6 +693,11 @@ model Client {
   // ("WhatsApp STOP" | "manual" | "import"). Cleared on re-subscribe.
   optOutAt        DateTime?
   optOutSource    String?
+  // Login-free client portal (served at /portal/[portalToken]). portalToken is
+  // an unguessable random token, NOT the id; portalEnabled lets the agent revoke
+  // access without losing the URL. Mirrors Property.shareSlug.
+  portalToken     String?   @unique
+  portalEnabled   Boolean   @default(false)
   notes       String?
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @default(now()) @updatedAt

@@ -21,6 +21,7 @@ import { MobileLeadActions } from "@/components/lead/MobileLeadActions";
 import { TEMPLATES } from "@/lib/whatsapp";
 import { LeadAiPanel } from "@/components/lead/LeadAiPanel";
 import { WhatsAppSend } from "@/components/lead/WhatsAppSend";
+import { ClientPortalControl } from "@/components/lead/ClientPortalControl";
 import { setClientConsent } from "@/app/(app)/leads/actions";
 import { aiUsageSnapshot } from "@/lib/ai/budget";
 
@@ -303,6 +304,16 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
                   </form>
                 </>
               )}
+            </Section>
+          )}
+
+          {canConsent && lead.clientId && (
+            <Section title="Client portal">
+              <ClientPortalControl
+                leadId={lead.id}
+                enabled={lead.client?.portalEnabled ?? false}
+                token={lead.client?.portalToken ?? null}
+              />
             </Section>
           )}
         </div>

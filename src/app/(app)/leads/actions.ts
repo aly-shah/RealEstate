@@ -12,6 +12,7 @@ import { humanize } from "@/lib/format";
 import { scheduleAutoFollowUp } from "@/lib/lead-followups";
 import { routeForCompany } from "@/lib/lead-router";
 import { enrollLeadInSequences } from "@/lib/drip";
+import { newShareSlug } from "@/lib/share";
 import { setFlash } from "@/lib/flash";
 
 const leadSchema = z.object({
@@ -387,5 +388,48 @@ export async function setClientConsent(formData: FormData): Promise<void> {
     summary: optOut ? "Client opted out of marketing (DNC)" : "Client re-subscribed to marketing",
   });
   await setFlash({ tone: "ok", message: optOut ? "Marked do-not-contact." : "Re-subscribed." });
+  revalidatePath(`/leads/${leadId}`);
+}
+
+/**
+ * Enable/disable the login-free client portal for a lead's client. Mints an
+ * unguessable token on first enable and reuses it thereafter (toggling off then
+ * on keeps the same URL). Gated by updateLeadsVisits + lead scope.
+ */
+export async function setClientPortal(formData: FormData): Promise<void> {
+  const user = await requireCompanyUser();
+  if (!can(user.role, "updateLeadsVisits")) return;
+
+  const leadId = String(formData.get("leadId") || "");
+  const enabled = String(formData.get("enabled")) === "true";
+  const lead = await prisma.lead.findFirst({
+    where: { id: leadId, companyId: user.companyId },
+    select: { id: true, clientId: true, agentId: true },
+  });
+  if (!lead || !lead.clientId) return;
+  if (user.role === "AGENT" && lead.agentId !== user.id) return;
+
+  const client = await prisma.client.findUnique({
+    where: { id: lead.clientId },
+    select: { portalToken: true, portalEnabled: true },
+  });
+  if (!client) return;
+  if (client.portalEnabled === enabled && client.portalToken) {
+    revalidatePath(`/leads/${leadId}`);
+    return; // no-op
+  }
+
+  await prisma.client.update({
+    where: { id: lead.clientId },
+    data: { portalEnabled: enabled, portalToken: client.portalToken ?? newShareSlug() },
+  });
+  await logActivity({
+    companyId: user.companyId,
+    userId: user.id,
+    action: enabled ? "client.portal_enabled" : "client.portal_disabled",
+    entityType: "CLIENT",
+    entityId: lead.clientId,
+    summary: `${enabled ? "Enabled" : "Disabled"} client portal`,
+  });
   revalidatePath(`/leads/${leadId}`);
 }

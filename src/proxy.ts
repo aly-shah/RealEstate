@@ -7,7 +7,8 @@ import { NextResponse } from "next/server";
 // "/p/" (with the trailing slash) is the public client-facing property share
 // page; the slash keeps it from matching /payments, /properties, /profile, etc.
 // "/verify-identity/" is the public CNIC scanner reached from a WhatsApp link.
-const PUBLIC_PATHS = ["/login", "/p/", "/verify-identity/"];
+// "/portal/" is the login-free client portal.
+const PUBLIC_PATHS = ["/login", "/p/", "/verify-identity/", "/portal/"];
 
 export default auth((req) => {
   const { pathname } = req.nextUrl;
