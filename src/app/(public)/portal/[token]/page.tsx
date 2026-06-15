@@ -66,6 +66,12 @@ export default async function ClientPortalPage({ params }: { params: Promise<{ t
             id: true, reference: true, title: true, type: true, listingType: true, status: true,
             city: true, area: true, salePrice: true, monthlyRent: true, bedrooms: true,
             shareSlug: true, shareEnabled: true,
+            media: {
+              where: { kind: { in: ["PHOTO", "FLOOR_PLAN"] } },
+              orderBy: { createdAt: "asc" },
+              take: 1,
+              select: { id: true },
+            },
           },
         })
       : Promise.resolve([]),
@@ -136,25 +142,39 @@ export default async function ClientPortalPage({ params }: { params: Promise<{ t
             <p className="text-sm text-muted">No properties shortlisted yet — your agent will add some soon.</p>
           ) : (
             <ul className="space-y-2">
-              {properties.map((p) => (
-                <li key={p.id} className="flex items-center justify-between gap-3 rounded-xl border border-line bg-paper px-4 py-3">
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium text-ink">{p.title}</p>
-                    <p className="text-xs text-muted">
-                      {[p.area, p.city].filter(Boolean).join(", ")}
-                      {p.bedrooms ? ` · ${p.bedrooms} bed` : ""} · {humanize(p.type)}
-                    </p>
-                  </div>
-                  <div className="shrink-0 text-right">
-                    <p className="text-sm font-semibold" style={{ color: accent }}>{priceLine(p)}</p>
-                    {p.shareEnabled && p.shareSlug ? (
-                      <a href={`/p/${p.shareSlug}`} className="text-xs font-semibold text-accent">View details →</a>
+              {properties.map((p) => {
+                const cover = p.media[0]
+                  ? `/api/public/portal-media/${token}/${p.id}/${p.media[0].id}`
+                  : null;
+                return (
+                  <li key={p.id} className="flex items-center gap-3 rounded-xl border border-line bg-paper p-3">
+                    {cover ? (
+                      /* eslint-disable-next-line @next/next/no-img-element */
+                      <img src={cover} alt={p.title} className="h-16 w-16 shrink-0 rounded-lg object-cover" loading="lazy" />
                     ) : (
-                      <StatusBadge status={p.status} />
+                      <div className="grid h-16 w-16 shrink-0 place-items-center rounded-lg bg-line-soft text-muted">
+                        <span className="text-lg">🏠</span>
+                      </div>
                     )}
-                  </div>
-                </li>
-              ))}
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium text-ink">{p.title}</p>
+                      <p className="text-xs text-muted">
+                        {[p.area, p.city].filter(Boolean).join(", ")}
+                        {p.bedrooms ? ` · ${p.bedrooms} bed` : ""} · {humanize(p.type)}
+                      </p>
+                      <p className="mt-0.5 text-sm font-semibold" style={{ color: accent }}>{priceLine(p)}</p>
+                    </div>
+                    <div className="shrink-0 self-start text-right">
+                      {p.shareEnabled && p.shareSlug ? (
+                        // ?c= attributes the view to this client (feeds high-intent scoring).
+                        <a href={`/p/${p.shareSlug}?c=${client.id}`} className="text-xs font-semibold text-accent">View →</a>
+                      ) : (
+                        <StatusBadge status={p.status} />
+                      )}
+                    </div>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </section>
