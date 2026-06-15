@@ -1478,6 +1478,10 @@ model DripEnrollment {
   @@unique([sequenceId, leadId])
   // Runner sweep: due ACTIVE enrollments across all tenants (like the Job queue).
   @@index([status, nextRunAt])
+  // "Exit this lead's sequences" (exitLeadFromSequences / opt-out) filters by
+  // leadId, and the lead-delete cascade hits it too — the [sequenceId,leadId]
+  // unique is sequenceId-leading so it can't serve a leadId-only lookup.
+  @@index([leadId])
 }
 
 // "Sync templates" button in Settings → Integrations; refreshed on
