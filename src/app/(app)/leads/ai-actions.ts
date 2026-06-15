@@ -4,6 +4,7 @@ import { requireCompanyUser } from "@/lib/session";
 import { logActivity } from "@/lib/activity";
 import { suggestLeadNextAction } from "@/lib/ai/handlers/lead-next-action";
 import { draftLeadReply } from "@/lib/ai/handlers/lead-reply-draft";
+import { generateLeadBrief } from "@/lib/ai/handlers/lead-brief";
 
 export interface AiActionResult {
   ok: boolean;
@@ -68,6 +69,28 @@ export async function aiDraftLeadReply(
       entityType: "LEAD",
       entityId: leadId,
       summary: steer ? `AI drafted reply (steered: ${steer.slice(0, 60)})` : "AI drafted reply",
+    });
+  }
+  return { ok: true, content: result.content, fromCache: result.fromCache };
+}
+
+/**
+ * Conversation Intelligence — a thread-level brief of the lead's message history
+ * (summary, sentiment, objections, commitments, next action).
+ */
+export async function aiLeadBrief(leadId: string): Promise<AiActionResult> {
+  const user = await requireCompanyUser();
+  const result = await generateLeadBrief({ companyId: user.companyId, leadId });
+  if (!result.ok) return { ok: false, reason: result.reason };
+
+  if (!result.fromCache) {
+    await logActivity({
+      companyId: user.companyId,
+      userId: user.id,
+      action: "ai.lead_brief",
+      entityType: "LEAD",
+      entityId: leadId,
+      summary: "AI conversation brief",
     });
   }
   return { ok: true, content: result.content, fromCache: result.fromCache };

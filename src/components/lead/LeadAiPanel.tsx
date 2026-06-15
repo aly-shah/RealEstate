@@ -1,13 +1,13 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { aiSuggestLeadNextAction, aiDraftLeadReply } from "@/app/(app)/leads/ai-actions";
+import { aiSuggestLeadNextAction, aiDraftLeadReply, aiLeadBrief } from "@/app/(app)/leads/ai-actions";
 
 interface Props {
   leadId: string;
 }
 
-type Mode = "ACTION" | "REPLY";
+type Mode = "ACTION" | "REPLY" | "BRIEF";
 
 /**
  * Phase-9 AI assistant panel on the lead detail page. Two buttons, one
@@ -33,7 +33,9 @@ export function LeadAiPanel({ leadId }: Props) {
     startTransition(async () => {
       const fn = next === "ACTION"
         ? () => aiSuggestLeadNextAction(leadId)
-        : () => aiDraftLeadReply(leadId, steering);
+        : next === "BRIEF"
+          ? () => aiLeadBrief(leadId)
+          : () => aiDraftLeadReply(leadId, steering);
       const result = await fn();
       if (!result.ok) {
         setError(result.reason ?? "AI request failed.");
@@ -74,6 +76,14 @@ export function LeadAiPanel({ leadId }: Props) {
         >
           {pending && mode === "REPLY" ? "Drafting…" : "Draft WhatsApp reply"}
         </button>
+        <button
+          type="button"
+          className="btn-ghost text-xs"
+          disabled={pending}
+          onClick={() => run("BRIEF")}
+        >
+          {pending && mode === "BRIEF" ? "Reading…" : "Conversation brief"}
+        </button>
       </div>
 
       {error && (
@@ -86,7 +96,7 @@ export function LeadAiPanel({ leadId }: Props) {
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-muted">
-              {mode === "ACTION" ? "Suggested next action" : "Draft reply"}
+              {mode === "ACTION" ? "Suggested next action" : mode === "BRIEF" ? "Conversation brief" : "Draft reply"}
             </span>
             {fromCache && (
               <span className="chip border-line-soft bg-line-soft text-xs text-muted">cached</span>
@@ -125,8 +135,8 @@ export function LeadAiPanel({ leadId }: Props) {
 
       {!content && !error && (
         <p className="text-xs text-muted">
-          Claude reads this lead's stage, history and preferences to recommend the next
-          step or draft a personalised WhatsApp reply.
+          AI reads this lead&rsquo;s stage, message history and preferences — get a conversation
+          brief, the next best action, or a personalised WhatsApp reply.
         </p>
       )}
     </div>
