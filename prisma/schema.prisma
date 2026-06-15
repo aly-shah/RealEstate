@@ -865,6 +865,9 @@ model Showing {
   // Phase 7: visit-verification-rate report buckets by createdAt — including
   // attempted visits that never reached a checkIn.
   @@index([companyId, createdAt])
+  // Client portal lists a client's visits (WHERE clientId) + the portal media
+  // gate; also serves the SetNull when a client is deleted. Mirrors Lead.clientId.
+  @@index([clientId])
 }
 
 model GpsLog {
@@ -939,6 +942,9 @@ model Deal {
   // propertyId is a required FK, so without this every property-detail view
   // full-scans the Deal table. Mirrors Lead/Showing/Document.propertyId.
   @@index([propertyId])
+  // Client portal lists a client's deals + payments (WHERE clientId); also
+  // serves the SetNull when a client is deleted. Mirrors Lead.clientId.
+  @@index([clientId])
 }
 
 model DealAgent {
