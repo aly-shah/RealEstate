@@ -23,6 +23,7 @@ export const NAV: NavItem[] = [
   { href: "/leads",         label: "Leads",         icon: "target",     roles: ["OWNER", "ADMIN", "AGENT"], group: "sales" },
   { href: "/deals",         label: "Deals",         icon: "exchange",   roles: ALL,                          group: "sales" },
   { href: "/whatsapp",      label: "WhatsApp inbox",icon: "message",    roles: OFFICE,                       group: "sales" },
+  { href: "/sequences",     label: "Sequences",     icon: "share",      roles: OFFICE,                       group: "sales" },
 
   { href: "/calendar",      label: "Calendar",      icon: "calendar",   roles: ["OWNER", "ADMIN", "AGENT"], group: "field" },
   { href: "/visits",        label: "Visits",        icon: "flag",       roles: ["OWNER", "ADMIN", "AGENT"], group: "field" },
