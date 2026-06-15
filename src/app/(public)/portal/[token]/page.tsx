@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { money, humanize, fmtDate } from "@/lib/format";
 import { waMeLink, normalizePhone } from "@/lib/whatsapp";
 import { StatusBadge } from "@/components/ui/Badge";
+import { PortalBooking } from "./PortalBooking";
 
 export const metadata: Metadata = {
   title: "Your property portal",
@@ -48,6 +49,9 @@ export default async function ClientPortalPage({ params }: { params: Promise<{ t
     orderBy: { updatedAt: "desc" },
   });
   const leadIds = leads.map((l) => l.id);
+  // Properties the client can self-book a viewing for — those linked to one of
+  // their leads (the lead carries the agent the booking is assigned to).
+  const bookablePropIds = new Set(leads.map((l) => l.propertyId).filter((x): x is string => !!x));
 
   // Shortlist = properties linked to their leads + properties they've visited.
   const showings = await prisma.showing.findMany({
@@ -163,6 +167,9 @@ export default async function ClientPortalPage({ params }: { params: Promise<{ t
                         {p.bedrooms ? ` · ${p.bedrooms} bed` : ""} · {humanize(p.type)}
                       </p>
                       <p className="mt-0.5 text-sm font-semibold" style={{ color: accent }}>{priceLine(p)}</p>
+                      {bookablePropIds.has(p.id) && (
+                        <PortalBooking token={token} propertyId={p.id} accent={accent} />
+                      )}
                     </div>
                     <div className="shrink-0 self-start text-right">
                       {p.shareEnabled && p.shareSlug ? (
