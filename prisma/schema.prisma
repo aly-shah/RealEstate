@@ -1041,6 +1041,11 @@ model Contract {
   // generated agreement.
   possessionDate     DateTime?
   customClauses      String?
+  // Per-document free-text overrides, keyed by document kind:
+  //   { "<kind>": { "mode": "append" | "replace", "text": "..." } }
+  // Lets an operator append to — or fully replace — any generated document's
+  // body before printing, without leaving the template for the rest.
+  documentOverrides  Json?
 
   // Party A verification — "landlord" for RENTAL, "seller" for SALE. landlordId
   // holds the best-available identifier (the property's ownerPhone) — not an FK.

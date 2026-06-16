@@ -14,7 +14,7 @@ import { toNumber, humanize } from "@/lib/format";
 import { setFlash } from "@/lib/flash";
 import { nextDealReference } from "@/lib/refs";
 import { initiateContractPipelines, ensureContractForDeal } from "@/lib/contract-service";
-import { syncDealDocuments } from "@/lib/deal-documents";
+import { syncDealDocuments, ALL_DEAL_DOC_KINDS, type DealDocKind } from "@/lib/deal-documents";
 
 const dealSchema = z.object({
   propertyId: z.string().min(1, "Property is required"),
@@ -478,6 +478,56 @@ export async function updateContract(formData: FormData): Promise<void> {
     await setFlash({ tone: "danger", message: e instanceof Error ? e.message : "Could not update the contract." });
   }
   revalidatePath(`/deals/${dealId}`);
+}
+
+const docOverrideSchema = z.object({
+  dealId: z.string().min(1),
+  kind: z.string().min(1),
+  mode: z.enum(["append", "replace"]),
+  text: z.string().max(20000).optional(),
+});
+
+type DocOverride = { mode: "append" | "replace"; text: string };
+
+/** Set (or clear) a per-document free-text override — append to or replace the
+ *  standard body of one generated document. Stored as a JSON map on the
+ *  contract, keyed by document kind. */
+export async function setDocumentOverride(formData: FormData): Promise<void> {
+  const user = await requireCompanyUser();
+  if (!can(user.role, "recordDeals")) return;
+
+  const parsed = docOverrideSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return;
+  const d = parsed.data;
+  if (!ALL_DEAL_DOC_KINDS.includes(d.kind as DealDocKind)) return;
+
+  const deal = await prisma.deal.findFirst({
+    where: { id: d.dealId, companyId: user.companyId },
+    select: { id: true },
+  });
+  if (!deal) return;
+
+  const contract = await ensureContractForDeal(d.dealId);
+  const map: Record<string, DocOverride> = { ...((contract.documentOverrides as Record<string, DocOverride> | null) ?? {}) };
+
+  const text = (d.text ?? "").trim();
+  if (text) map[d.kind] = { mode: d.mode, text };
+  else delete map[d.kind]; // empty text → revert to the standard template
+
+  await prisma.contract.update({
+    where: { dealId: d.dealId },
+    data: { documentOverrides: map as Prisma.InputJsonValue },
+  });
+  await logActivity({
+    companyId: user.companyId,
+    userId: user.id,
+    action: "document.customized",
+    entityType: "DEAL",
+    entityId: d.dealId,
+    summary: `${text ? `Customised (${d.mode})` : "Reset"} the ${d.kind} document`,
+  });
+  revalidatePath(`/deal-documents/${d.dealId}/${d.kind}`);
+  revalidatePath(`/deals/${d.dealId}`);
 }
 
 const dealForecastSchema = z.object({

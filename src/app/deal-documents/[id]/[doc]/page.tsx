@@ -7,6 +7,7 @@ import { money, fmtDate, fmtDateTime, toNumber } from "@/lib/format";
 import { Brand } from "@/components/ui/Brand";
 import { PrintButton } from "@/components/PrintButton";
 import { ALL_DEAL_DOC_KINDS, type DealDocKind } from "@/lib/deal-documents";
+import { setDocumentOverride } from "@/app/(app)/deals/actions";
 
 /**
  * Standalone, print-friendly deal document (browser → Save as PDF). One route
@@ -76,6 +77,14 @@ export default async function DealDocumentPage({
     clauses: c?.customClauses ?? null,
   };
 
+  // Per-document free-text override (append to, or replace, the standard body).
+  const overrides = (c?.documentOverrides as Record<string, { mode?: string; text?: string }> | null) ?? {};
+  const ov = overrides[kind];
+  const ovText = typeof ov?.text === "string" ? ov.text.trim() : "";
+  const ovMode = ov?.mode === "replace" ? "replace" : "append";
+  const doReplace = ovMode === "replace" && ovText.length > 0;
+  const doAppend = ovMode === "append" && ovText.length > 0;
+
   const propLine = [deal.property.address, deal.property.area, deal.property.city].filter(Boolean).join(", ");
   const TITLES: Record<DealDocKind, string> = {
     agreement: isSale ? "Agreement to Sell" : "Rental / Lease Agreement",
@@ -100,6 +109,39 @@ export default async function DealDocumentPage({
           <PrintButton />
         </div>
 
+        {/* Office-only inline editor — append to or replace this document's body. */}
+        <details className="mb-4 rounded-xl border border-line bg-paper p-3 print:hidden" {...(ovText ? { open: true } : {})}>
+          <summary className="cursor-pointer text-sm font-medium text-ink">
+            Customize this document{ovText ? <span className="ml-2 text-xs font-normal text-accent">(custom text applied · {ovMode})</span> : null}
+          </summary>
+          <form action={setDocumentOverride} className="mt-3 space-y-3">
+            <input type="hidden" name="dealId" value={deal.id} />
+            <input type="hidden" name="kind" value={kind} />
+            <div>
+              <label className="label" htmlFor="mode">Mode</label>
+              <select id="mode" name="mode" className="field" defaultValue={ovMode}>
+                <option value="append">Append to the standard text</option>
+                <option value="replace">Replace the standard body</option>
+              </select>
+            </div>
+            <div>
+              <label className="label" htmlFor="text">Custom text</label>
+              <textarea
+                id="text"
+                name="text"
+                rows={8}
+                className="field font-[inherit]"
+                defaultValue={ovText}
+                placeholder="Type the additional clauses, or the full document text to replace the standard body…"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <button type="submit" className="btn-primary">Save &amp; apply</button>
+              <span className="text-xs text-muted">Clear the text and save to revert to the standard template.</span>
+            </div>
+          </form>
+        </details>
+
         <article className="rounded-lg border border-line bg-white p-10 text-[13px] leading-relaxed text-ink print:border-0 print:p-0">
           {/* Letterhead */}
           <header className="flex items-start justify-between border-b border-line pb-5">
@@ -114,32 +156,39 @@ export default async function DealDocumentPage({
             </div>
           </header>
 
-          {kind === "agreement" && (
-            <AgreementBody isSale={isSale} partyA={partyA} partyB={partyB} t={t} property={deal.property} propLine={propLine} />
-          )}
-          {kind === "sale-deed" && (
-            <SaleDeedBody partyA={partyA} partyB={partyB} t={t} property={deal.property} propLine={propLine} />
-          )}
-          {kind === "payment-plan" && (
-            <PaymentPlanBody partyB={partyB} t={t} reference={deal.reference} propTitle={deal.property.title} />
-          )}
-          {kind === "receipt" && (
-            <ReceiptBody isSale={isSale} partyA={partyA} partyB={partyB} t={t} reference={deal.reference} propTitle={deal.property.title} />
-          )}
-          {kind === "possession" && (
-            <PossessionBody isSale={isSale} partyA={partyA} partyB={partyB} t={t} propTitle={deal.property.title} propLine={propLine} />
-          )}
-          {kind === "noc" && (
-            <NocBody isSale={isSale} partyA={partyA} partyB={partyB} propTitle={deal.property.title} propLine={propLine} />
-          )}
-          {kind === "affidavit" && (
-            <AffidavitBody isSale={isSale} partyA={partyA} partyB={partyB} propTitle={deal.property.title} propLine={propLine} />
-          )}
-          {kind === "power-of-attorney" && (
-            <PowerOfAttorneyBody partyA={partyA} partyB={partyB} property={deal.property} propLine={propLine} />
-          )}
-          {kind === "tax-certificate" && (
-            <TaxCertificateBody partyA={partyA} partyB={partyB} t={t} property={deal.property} propLine={propLine} />
+          {doReplace ? (
+            <OverrideBody text={ovText} />
+          ) : (
+            <>
+              {kind === "agreement" && (
+                <AgreementBody isSale={isSale} partyA={partyA} partyB={partyB} t={t} property={deal.property} propLine={propLine} />
+              )}
+              {kind === "sale-deed" && (
+                <SaleDeedBody partyA={partyA} partyB={partyB} t={t} property={deal.property} propLine={propLine} />
+              )}
+              {kind === "payment-plan" && (
+                <PaymentPlanBody partyB={partyB} t={t} reference={deal.reference} propTitle={deal.property.title} />
+              )}
+              {kind === "receipt" && (
+                <ReceiptBody isSale={isSale} partyA={partyA} partyB={partyB} t={t} reference={deal.reference} propTitle={deal.property.title} />
+              )}
+              {kind === "possession" && (
+                <PossessionBody isSale={isSale} partyA={partyA} partyB={partyB} t={t} propTitle={deal.property.title} propLine={propLine} />
+              )}
+              {kind === "noc" && (
+                <NocBody isSale={isSale} partyA={partyA} partyB={partyB} propTitle={deal.property.title} propLine={propLine} />
+              )}
+              {kind === "affidavit" && (
+                <AffidavitBody isSale={isSale} partyA={partyA} partyB={partyB} propTitle={deal.property.title} propLine={propLine} />
+              )}
+              {kind === "power-of-attorney" && (
+                <PowerOfAttorneyBody partyA={partyA} partyB={partyB} property={deal.property} propLine={propLine} />
+              )}
+              {kind === "tax-certificate" && (
+                <TaxCertificateBody partyA={partyA} partyB={partyB} t={t} property={deal.property} propLine={propLine} />
+              )}
+              {doAppend && <OverrideSection text={ovText} />}
+            </>
           )}
 
           <footer className="mt-8 border-t border-line pt-4 text-[11px] text-muted">
@@ -369,6 +418,21 @@ function PossessionBody({
       {t.clauses && <p className="mb-2 whitespace-pre-wrap">{t.clauses}</p>}
       <SignatureBlock partyA={partyA} partyB={partyB} />
     </div>
+  );
+}
+
+/** Full free-text body (replace mode). */
+function OverrideBody({ text }: { text: string }) {
+  return <div className="whitespace-pre-wrap py-6">{text}</div>;
+}
+
+/** Extra free-text appended below the standard body (append mode). */
+function OverrideSection({ text }: { text: string }) {
+  return (
+    <section className="mt-2 break-inside-avoid">
+      <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted">Additional terms</p>
+      <p className="whitespace-pre-wrap">{text}</p>
+    </section>
   );
 }
 
