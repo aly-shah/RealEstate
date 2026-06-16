@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { toNumber } from "@/lib/format";
+import { stageWinWeight, winRateCalibration, type WinRateCalibration } from "@/lib/close-probability";
 import type { LeadStage, LeadSource, DealStatus } from "@prisma/client";
 
 /* ─────────────────────────────────────────────────────────── Date-range parsing */
@@ -402,18 +403,6 @@ export async function grossCommissionByAgent(companyId: string, range: DateRange
 
 /* ─────────────────────────────────────────── Pipeline forecast (weighted) */
 
-// Probability that an open deal at each stage eventually closes-won. Used to
-// risk-weight the open pipeline into an expected-revenue figure.
-const STAGE_WIN_WEIGHT: Record<DealStatus, number> = {
-  DRAFT: 0.1,
-  NEGOTIATION: 0.3,
-  TOKEN: 0.6,
-  BOOKED: 0.8,
-  AGREEMENT: 0.9,
-  CLOSED_WON: 1,
-  CLOSED_LOST: 0,
-};
-
 const FORECAST_STAGE_ORDER: DealStatus[] = ["DRAFT", "NEGOTIATION", "TOKEN", "BOOKED", "AGREEMENT"];
 
 export interface ForecastStageRow {
@@ -435,6 +424,8 @@ export interface PipelineForecast {
   totalWeightedGci: number;
   /** Weighted value of deals whose estimatedCloseDate is within the next 90 days. */
   next90Weighted: number;
+  /** How the stage weights were calibrated against the company's own history. */
+  calibration: WinRateCalibration;
 }
 
 /**
@@ -444,16 +435,19 @@ export interface PipelineForecast {
  * within 90 days (by estimatedCloseDate) for a near-term view.
  */
 export async function pipelineForecast(companyId: string): Promise<PipelineForecast> {
-  const deals = await prisma.deal.findMany({
-    where: { companyId, status: { notIn: ["CLOSED_WON", "CLOSED_LOST"] } },
-    select: {
-      status: true,
-      estimatedCloseDate: true,
-      grossCommissionPercentage: true,
-      sale: { select: { salePrice: true } },
-      rental: { select: { monthlyRent: true } },
-    },
-  });
+  const [deals, calibration] = await Promise.all([
+    prisma.deal.findMany({
+      where: { companyId, status: { notIn: ["CLOSED_WON", "CLOSED_LOST"] } },
+      select: {
+        status: true,
+        estimatedCloseDate: true,
+        grossCommissionPercentage: true,
+        sale: { select: { salePrice: true } },
+        rental: { select: { monthlyRent: true } },
+      },
+    }),
+    winRateCalibration(companyId),
+  ]);
 
   const map = new Map<DealStatus, ForecastStageRow>();
   let totalOpenValue = 0;
@@ -464,7 +458,7 @@ export async function pipelineForecast(companyId: string): Promise<PipelineForec
 
   for (const d of deals) {
     const value = toNumber(d.sale?.salePrice ?? d.rental?.monthlyRent);
-    const weight = STAGE_WIN_WEIGHT[d.status] ?? 0;
+    const weight = stageWinWeight(d.status, calibration.factor);
     const weighted = value * weight;
     totalOpenValue += value;
     totalWeightedValue += weighted;
@@ -479,5 +473,5 @@ export async function pipelineForecast(companyId: string): Promise<PipelineForec
   }
 
   const byStage = FORECAST_STAGE_ORDER.map((s) => map.get(s)).filter((r): r is ForecastStageRow => !!r);
-  return { byStage, openDeals: deals.length, totalOpenValue, totalWeightedValue, totalWeightedGci, next90Weighted };
+  return { byStage, openDeals: deals.length, totalOpenValue, totalWeightedValue, totalWeightedGci, next90Weighted, calibration };
 }

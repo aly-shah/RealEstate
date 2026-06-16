@@ -24,6 +24,7 @@ import {
 } from "@/app/(app)/deals/actions";
 import { WhatsAppButton } from "@/components/whatsapp/WhatsAppButton";
 import { TEMPLATES } from "@/lib/whatsapp";
+import { closeProbability, winRateCalibration, MIN_CALIBRATION_SAMPLE } from "@/lib/close-probability";
 
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -73,6 +74,13 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
   const value = toNumber(deal.sale?.salePrice ?? deal.rental?.monthlyRent);
   const paid = deal.payments.filter((p) => p.status === "PAID").reduce((s, p) => s + toNumber(p.amount), 0);
   const office = can(user.role, "recordDeals");
+
+  // Per-deal close likelihood (stage win-probability, calibrated to the
+  // company's historical close rate). Drives the "Close likelihood" widget.
+  const cal = await winRateCalibration(user.companyId);
+  const closeProb = closeProbability(deal.status, cal.factor);
+  const dealClosed = deal.status === "CLOSED_WON" || deal.status === "CLOSED_LOST";
+  const decided = cal.won + cal.lost;
   const suggestedComm = Math.round(value * 0.02);
   const now = new Date();
   const canBill = can(user.role, "managePayments");
@@ -298,6 +306,27 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
 
           {office && (
             <Section title="Forecast & GCI">
+              {!dealClosed && (
+                <div className="mb-4 rounded-xl border border-line bg-paper p-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">Close likelihood</span>
+                    <span className="text-lg font-semibold text-ink">{closeProb}%</span>
+                  </div>
+                  <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-line-soft">
+                    <div className="h-full rounded-full brand-gradient" style={{ width: `${closeProb}%` }} />
+                  </div>
+                  {value > 0 && (
+                    <p className="mt-2 text-xs text-muted">
+                      Expected value ≈ <span className="font-medium text-ink">{compactMoney((value * closeProb) / 100)}</span> of {compactMoney(value)}
+                    </p>
+                  )}
+                  <p className="mt-1 text-xs text-muted">
+                    {cal.calibrated
+                      ? `Calibrated to your ${Math.round((cal.rate ?? 0) * 100)}% close rate (${decided} decided deals).`
+                      : `Based on stage — close ${Math.max(1, MIN_CALIBRATION_SAMPLE - decided)} more deal${MIN_CALIBRATION_SAMPLE - decided === 1 ? "" : "s"} to calibrate to your history.`}
+                  </p>
+                </div>
+              )}
               <form action={updateDealForecast} className="space-y-3">
                 <input type="hidden" name="id" value={deal.id} />
                 <div>

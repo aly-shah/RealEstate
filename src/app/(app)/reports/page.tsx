@@ -293,8 +293,11 @@ export default async function ReportsPage({
 
       <Section title="Pipeline forecast (weighted)">
         <p className="mb-4 text-sm text-muted">
-          Open-deal value weighted by each stage&rsquo;s win probability. &ldquo;Expected GCI&rdquo; applies each
-          deal&rsquo;s gross-commission&nbsp;%.
+          Open-deal value weighted by each stage&rsquo;s win probability
+          {forecast.calibration.calibrated
+            ? `, calibrated to your ${Math.round((forecast.calibration.rate ?? 0) * 100)}% historical close rate (${forecast.calibration.won + forecast.calibration.lost} decided deals)`
+            : " (default weights — close more deals to calibrate to your own history)"}
+          . &ldquo;Expected GCI&rdquo; applies each deal&rsquo;s gross-commission&nbsp;%.
         </p>
         <div className="mb-4 grid gap-3 sm:grid-cols-4">
           <StatCard label="Weighted pipeline" value={compactMoney(forecast.totalWeightedValue)} sub={`${compactMoney(forecast.totalOpenValue)} open`} tone="ink" />
