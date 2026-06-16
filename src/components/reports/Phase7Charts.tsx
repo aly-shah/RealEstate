@@ -38,11 +38,11 @@ export function SalesVsRentalsChart({ data }: { data: MonthlyRevenuePoint[] }) {
       <AreaChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
         <defs>
           <linearGradient id="rev-sales" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={COLORS.accent} stopOpacity={0.35} />
-            <stop offset="100%" stopColor={COLORS.accent} stopOpacity={0} />
+            <stop offset="0%" stopColor="#6366f1" stopOpacity={0.42} />
+            <stop offset="100%" stopColor="#4f46e5" stopOpacity={0.02} />
           </linearGradient>
           <linearGradient id="rev-rentals" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={COLORS.ok} stopOpacity={0.3} />
+            <stop offset="0%" stopColor={COLORS.ok} stopOpacity={0.34} />
             <stop offset="100%" stopColor={COLORS.ok} stopOpacity={0} />
           </linearGradient>
         </defs>
@@ -53,8 +53,8 @@ export function SalesVsRentalsChart({ data }: { data: MonthlyRevenuePoint[] }) {
           contentStyle={tooltipStyle}
           formatter={(v: number, name: string) => [`PKR ${compact(v)}`, name === "sales" ? "Sales" : "Rentals"]}
         />
-        <Area type="monotone" dataKey="sales" stackId="rev" stroke={COLORS.accent} strokeWidth={2} fill="url(#rev-sales)" />
-        <Area type="monotone" dataKey="rentals" stackId="rev" stroke={COLORS.ok} strokeWidth={2} fill="url(#rev-rentals)" />
+        <Area type="monotone" dataKey="sales" stackId="rev" stroke={COLORS.accent} strokeWidth={2.5} fill="url(#rev-sales)" dot={false} />
+        <Area type="monotone" dataKey="rentals" stackId="rev" stroke={COLORS.ok} strokeWidth={2.5} fill="url(#rev-rentals)" dot={false} />
       </AreaChart>
     </ResponsiveContainer>
   );
@@ -71,6 +71,11 @@ export function SourceConversionChart({ data }: { data: SourceConversionRow[] })
   return (
     <ResponsiveContainer width="100%" height={Math.max(220, rows.length * 30)}>
       <BarChart data={rows} layout="vertical" margin={{ top: 4, right: 48, left: 4, bottom: 0 }}>
+        <defs>
+          <linearGradient id="srcWon" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stopColor="#16a34a" /><stop offset="100%" stopColor="#34d399" />
+          </linearGradient>
+        </defs>
         <CartesianGrid strokeDasharray="3 3" stroke={COLORS.line} horizontal={false} />
         <XAxis type="number" {...axis} allowDecimals={false} />
         <YAxis type="category" dataKey="source" width={110} {...axis} />
@@ -84,7 +89,7 @@ export function SourceConversionChart({ data }: { data: SourceConversionRow[] })
           }}
         />
         <Bar dataKey="Total" fill={COLORS.line} barSize={10} radius={[0, 4, 4, 0]} />
-        <Bar dataKey="Won" fill={COLORS.ok} barSize={10} radius={[0, 4, 4, 0]} />
+        <Bar dataKey="Won" fill="url(#srcWon)" barSize={10} radius={[0, 4, 4, 0]} />
       </BarChart>
     </ResponsiveContainer>
   );
@@ -103,7 +108,7 @@ export function FunnelDropoffChart({ data }: { data: FunnelStep[] }) {
             <span className="truncate text-slate">{step.stage.replace(/_/g, " ").toLowerCase()}</span>
             <div className="h-5 overflow-hidden rounded-md bg-line-soft">
               <div
-                className={`h-full transition-[width] ${isCloseStage ? "bg-ok" : "bg-accent"}`}
+                className={`h-full transition-[width] ${isCloseStage ? "bg-ok" : "brand-gradient"}`}
                 style={{ width: `${width}%` }}
               />
             </div>
@@ -158,7 +163,7 @@ export function InventoryAgingChart({ data }: { data: InventoryAgingBucket[] }) 
       {data.map((b, i) => {
         const width = Math.round((b.count / max) * 100);
         // Older buckets get warmer tone — visual cue that 180+ inventory is stale.
-        const cls = i < 2 ? "bg-accent" : i < 4 ? "bg-warn" : "bg-danger";
+        const cls = i < 2 ? "brand-gradient" : i < 4 ? "bg-warn" : "bg-danger";
         return (
           <div key={b.label} className="grid grid-cols-[120px_1fr_auto] items-center gap-3 text-sm">
             <span className="text-slate">{b.label}</span>
