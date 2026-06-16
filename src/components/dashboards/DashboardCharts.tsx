@@ -58,10 +58,10 @@ export function RevenueTrendChart({ data, locale = "en", labels }: RevenueTrendC
     <div>
       <div className="mb-3 flex flex-wrap items-baseline justify-between gap-3 px-1">
         <div>
-          <p className="text-2xl font-semibold tracking-tight text-ink">
+          <p className="text-[1.7rem] font-bold leading-none tracking-[-0.02em] text-ink">
             {compactMoney(total, locale)}
           </p>
-          <p className="text-xs text-muted">
+          <p className="mt-1 text-xs text-muted">
             {localizeDigits(data.length, locale)}-month sales total
           </p>
         </div>
@@ -80,8 +80,13 @@ export function RevenueTrendChart({ data, locale = "en", labels }: RevenueTrendC
         <AreaChart data={data} margin={{ top: 10, right: 8, left: 0, bottom: 0 }}>
           <defs>
             <linearGradient id="dashRev" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor={COLORS.accent} stopOpacity={0.32} />
-              <stop offset="100%" stopColor={COLORS.accent} stopOpacity={0} />
+              <stop offset="0%" stopColor="#6366f1" stopOpacity={0.38} />
+              <stop offset="55%" stopColor="#4f46e5" stopOpacity={0.14} />
+              <stop offset="100%" stopColor="#4f46e5" stopOpacity={0} />
+            </linearGradient>
+            <linearGradient id="dashRevStroke" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stopColor="#6366f1" />
+              <stop offset="100%" stopColor="#0ea5e9" />
             </linearGradient>
           </defs>
           <CartesianGrid strokeDasharray="3 3" stroke={COLORS.line} vertical={false} />
@@ -106,11 +111,11 @@ export function RevenueTrendChart({ data, locale = "en", labels }: RevenueTrendC
           <Area
             type="monotone"
             dataKey="revenue"
-            stroke={COLORS.accent}
-            strokeWidth={2.5}
+            stroke="url(#dashRevStroke)"
+            strokeWidth={3}
             fill="url(#dashRev)"
-            dot={{ r: 3, stroke: COLORS.accent, strokeWidth: 2, fill: COLORS.paper }}
-            activeDot={{ r: 5, stroke: COLORS.accent, strokeWidth: 2, fill: COLORS.paper }}
+            dot={false}
+            activeDot={{ r: 6, stroke: "#4f46e5", strokeWidth: 2.5, fill: COLORS.paper }}
           />
         </AreaChart>
       </ResponsiveContainer>
@@ -161,19 +166,22 @@ export function InventoryDonut({
 
   return (
     <div className="flex flex-col items-center gap-4 sm:flex-row sm:items-start sm:justify-between">
-      <div className="relative h-44 w-44 shrink-0">
+      <div
+        className="relative h-44 w-44 shrink-0"
+        style={{ filter: "drop-shadow(0 10px 16px rgba(15,23,42,0.12))" }}
+      >
         <ResponsiveContainer width="100%" height="100%">
           <PieChart>
             <Pie
               data={slices}
               dataKey="value"
               innerRadius={56}
-              outerRadius={84}
-              paddingAngle={2}
+              outerRadius={86}
+              paddingAngle={2.5}
               startAngle={90}
               endAngle={-270}
               stroke={COLORS.paper}
-              strokeWidth={2}
+              strokeWidth={2.5}
             >
               {slices.map((s) => (
                 <Cell key={s.status} fill={s.color} />
@@ -195,10 +203,10 @@ export function InventoryDonut({
         </ResponsiveContainer>
         <div className="pointer-events-none absolute inset-0 grid place-items-center text-center">
           <div>
-            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted">
+            <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">
               {totalLabel}
             </p>
-            <p className="text-2xl font-semibold tracking-tight text-ink">
+            <p className="text-[1.75rem] font-bold leading-none tracking-[-0.02em] text-ink">
               {localizeDigits(total, locale)}
             </p>
           </div>
@@ -212,7 +220,7 @@ export function InventoryDonut({
             <li key={s.status} className="flex items-center gap-2">
               <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: s.color }} />
               <span className="min-w-0 flex-1 truncate text-slate">{s.name}</span>
-              <span className="font-semibold text-ink">
+              <span className="font-bold text-ink">
                 {localizeDigits(s.value, locale)}
               </span>
               <span className="w-10 text-end text-xs text-muted">
@@ -249,6 +257,17 @@ export function LeadsFunnelChart({
   return (
     <ResponsiveContainer width="100%" height={Math.max(240, rows.length * 28)}>
       <BarChart data={rows} layout="vertical" margin={{ top: 4, right: 24, left: 8, bottom: 0 }}>
+        <defs>
+          <linearGradient id="funnelAccent" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stopColor="#6366f1" /><stop offset="100%" stopColor="#0ea5e9" />
+          </linearGradient>
+          <linearGradient id="funnelOk" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stopColor="#16a34a" /><stop offset="100%" stopColor="#34d399" />
+          </linearGradient>
+          <linearGradient id="funnelWarn" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stopColor="#d97706" /><stop offset="100%" stopColor="#f59e0b" />
+          </linearGradient>
+        </defs>
         <CartesianGrid strokeDasharray="3 3" stroke={COLORS.line} horizontal={false} />
         <XAxis
           type="number"
@@ -263,12 +282,15 @@ export function LeadsFunnelChart({
           formatter={(v: number) => [localizeDigits(v, locale), "Leads"]}
           cursor={{ fill: "rgba(79, 70, 229, 0.06)" }}
         />
-        <Bar dataKey="count" radius={[0, 6, 6, 0]} barSize={16}>
+        <Bar dataKey="count" radius={[0, 7, 7, 0]} barSize={18}>
           {rows.map((r, i) => {
-            const intensity = 0.45 + (r.count / max) * 0.55;
-            const fill =
-              r.raw === "CLOSED_WON" ? COLORS.ok : r.raw === "NEGOTIATION" || r.raw === "PAYMENT" ? COLORS.warn : COLORS.accent;
-            return <Cell key={i} fill={fill} fillOpacity={intensity} />;
+            const grad =
+              r.raw === "CLOSED_WON"
+                ? "url(#funnelOk)"
+                : r.raw === "NEGOTIATION" || r.raw === "PAYMENT"
+                  ? "url(#funnelWarn)"
+                  : "url(#funnelAccent)";
+            return <Cell key={i} fill={grad} fillOpacity={0.55 + (r.count / max) * 0.45} />;
           })}
         </Bar>
       </BarChart>
