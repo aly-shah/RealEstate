@@ -71,6 +71,10 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "This contract is already finalised." }, { status: 409 });
     }
     const isLandlord = contract.landlordToken === token;
+    // Party A/B read as seller/buyer for a sale, landlord/renter for a lease.
+    const partyLabel = contract.type === "SALE"
+      ? (isLandlord ? "Seller" : "Buyer")
+      : (isLandlord ? "Landlord" : "Renter");
 
     // 4. Validate the image bytes (extension + magic-byte sniff).
     const buffer = Buffer.from(await file.arrayBuffer());
@@ -144,7 +148,7 @@ export async function POST(req: Request) {
         data: {
           companyId: contract.companyId,
           type: "CNIC_PASSPORT",
-          name: `${isLandlord ? "Landlord" : "Renter"} CNIC — ${ocrData.fullName}`,
+          name: `${partyLabel} CNIC — ${ocrData.fullName}`,
           url: fileUrl,
           verification: "VERIFIED",
           dealId: contract.dealId,

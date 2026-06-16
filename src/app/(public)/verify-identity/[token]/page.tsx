@@ -102,7 +102,7 @@ export default function PublicCnicScanner() {
               <p><strong>Extracted CNIC:</strong> {result.cnic}</p>
             </div>
             <p className="mt-4 text-xs text-muted">
-              Your details have been recorded against the rental agreement. You can close this page.
+              Your details have been recorded against your agreement. You can close this page.
             </p>
           </div>
         )}

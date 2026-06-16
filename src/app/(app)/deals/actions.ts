@@ -316,7 +316,7 @@ export async function generateCommission(formData: FormData): Promise<void> {
  * WhatsApp. Office-only (recordDeals); tenant-scoped. Non-fatal delivery issues
  * surface as a `warn` flash with the links so the agent can share manually.
  */
-export async function startRentalContract(formData: FormData): Promise<void> {
+export async function startContract(formData: FormData): Promise<void> {
   const user = await requireCompanyUser();
   if (!can(user.role, "recordDeals")) return;
 
@@ -329,11 +329,9 @@ export async function startRentalContract(formData: FormData): Promise<void> {
     select: { id: true, type: true, reference: true },
   });
   if (!deal) return;
-  if (deal.type !== "RENTAL") {
-    await setFlash({ tone: "danger", message: "CNIC contracts are only available on rental deals." });
-    revalidatePath(`/deals/${dealId}`);
-    return;
-  }
+
+  // Works for both deal types — sale agreements and rental leases.
+  const parties = deal.type === "SALE" ? "seller and buyer" : "landlord and renter";
 
   try {
     const res = await initiateContractPipelines(dealId);
@@ -344,12 +342,12 @@ export async function startRentalContract(formData: FormData): Promise<void> {
       entityType: "DEAL",
       entityId: dealId,
       summary: `Started CNIC e-sign for ${deal.reference}`,
-      meta: { contractId: res.contractId, landlordSent: res.landlordSent, renterSent: res.renterSent },
+      meta: { contractId: res.contractId, type: deal.type, landlordSent: res.landlordSent, renterSent: res.renterSent },
     });
     if (res.warnings.length > 0) {
       await setFlash({ tone: "warn", message: res.warnings.join(" ") });
     } else {
-      await setFlash({ tone: "ok", message: "CNIC verification links sent to the landlord and renter." });
+      await setFlash({ tone: "ok", message: `CNIC verification links sent to the ${parties}.` });
     }
   } catch (e) {
     await setFlash({ tone: "danger", message: e instanceof Error ? e.message : "Could not start the contract." });

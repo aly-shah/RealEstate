@@ -227,6 +227,11 @@ enum ContractStatus {
   TERMINATED
 }
 
+enum ContractType {
+  SALE
+  RENTAL
+}
+
 enum DealAgentRole {
   MAIN
   CO_AGENT
@@ -1013,25 +1018,32 @@ model Rental {
 model Contract {
   id                 String         @id @default(cuid())
   companyId          String
-  dealId             String         @unique // Ties directly to a rental Deal.
+  dealId             String         @unique // Ties directly to a Deal (sale or rental).
   status             ContractStatus @default(DRAFT)
+  // RENTAL snapshots the lease terms; SALE snapshots salePrice. The landlord/
+  // renter columns below double as seller/buyer for a SALE — the two-party CNIC
+  // e-sign flow is identical, so one model serves both deal types.
+  type               ContractType   @default(RENTAL)
 
-  // Terms mirrored from the Rental deal for legal-snapshot stability.
-  monthlyRent        Decimal        @db.Decimal(14, 2)
-  deposit            Decimal        @db.Decimal(14, 2)
-  leaseMonths        Int
-  startDate          DateTime
-  endDate            DateTime
+  // Terms mirrored from the deal for legal-snapshot stability — only the block
+  // matching `type` is populated; the other stays null.
+  monthlyRent        Decimal?       @db.Decimal(14, 2) // RENTAL
+  deposit            Decimal?       @db.Decimal(14, 2) // RENTAL
+  leaseMonths        Int? // RENTAL
+  startDate          DateTime? // RENTAL
+  endDate            DateTime? // RENTAL
+  salePrice          Decimal?       @db.Decimal(14, 2) // SALE
 
-  // Landlord verification data. landlordId holds the best-available identifier
-  // (the property's ownerPhone) — not an FK.
+  // Party A verification — "landlord" for RENTAL, "seller" for SALE. landlordId
+  // holds the best-available identifier (the property's ownerPhone) — not an FK.
   landlordId         String?
   landlordCnic       String?        // Extracted via OCR.
   landlordCnicName   String?        // Extracted via OCR.
   landlordVerifiedAt DateTime?
   landlordToken      String         @unique @default(cuid()) // Public access-link token.
 
-  // Renter verification data. renterId is the renter's Client id (FK `renter`).
+  // Party B verification — "renter" for RENTAL, "buyer" for SALE. renterId is
+  // that party's Client id (FK `renter`).
   renterId           String?
   renterCnic         String?        // Extracted via OCR.
   renterCnicName     String?        // Extracted via OCR.

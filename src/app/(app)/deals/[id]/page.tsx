@@ -16,7 +16,7 @@ import {
 } from "@/components/deal/DealControls";
 import { markPaymentPaid } from "@/app/(app)/payments/actions";
 import {
-  startRentalContract,
+  startContract,
   updateDealForecast,
   toggleChecklistItem,
   addChecklistItem,
@@ -358,13 +358,13 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
             </Section>
           )}
 
-          {office && deal.type === "RENTAL" && (
-            <Section title="Lease verification">
+          {office && (
+            <Section title={deal.type === "SALE" ? "Sale agreement verification" : "Lease verification"}>
               {deal.contract ? (
                 <>
                   <Row label="Status" value={<StatusBadge status={deal.contract.status} />} />
                   <Row
-                    label="Landlord CNIC"
+                    label={`${deal.type === "SALE" ? "Seller" : "Landlord"} CNIC`}
                     value={
                       deal.contract.landlordVerifiedAt
                         ? <span className="font-medium text-ok">Verified</span>
@@ -372,14 +372,14 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
                     }
                   />
                   <Row
-                    label="Renter CNIC"
+                    label={`${deal.type === "SALE" ? "Buyer" : "Renter"} CNIC`}
                     value={
                       deal.contract.renterVerifiedAt
                         ? <span className="font-medium text-ok">Verified</span>
                         : <span className="text-muted">Awaiting</span>
                     }
                   />
-                  <form action={startRentalContract} className="mt-3">
+                  <form action={startContract} className="mt-3">
                     <input type="hidden" name="dealId" value={deal.id} />
                     <button className="btn-ghost w-full justify-center text-xs">Resend CNIC links</button>
                   </form>
@@ -387,9 +387,10 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
               ) : (
                 <>
                   <p className="mb-3 text-sm text-muted">
-                    Send the landlord and renter a secure WhatsApp link to photograph their CNIC for the lease agreement.
+                    Send the {deal.type === "SALE" ? "seller and buyer" : "landlord and renter"} a secure WhatsApp link
+                    to photograph their CNIC for the {deal.type === "SALE" ? "sale agreement" : "lease agreement"}.
                   </p>
-                  <form action={startRentalContract}>
+                  <form action={startContract}>
                     <input type="hidden" name="dealId" value={deal.id} />
                     <button className="btn-accent w-full justify-center">Start CNIC verification</button>
                   </form>

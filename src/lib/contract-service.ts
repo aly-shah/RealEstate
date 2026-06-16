@@ -5,8 +5,10 @@ import { sendAutomationTemplate } from "@/lib/wa-automation";
 import { decryptSecret } from "@/lib/crypto";
 
 /**
- * Contract pipeline: create the rental e-sign Contract for a deal (idempotent —
- * one per deal) and dispatch the two public CNIC-verify links over WhatsApp.
+ * Contract pipeline: create the e-sign Contract for a deal — sale or rental
+ * (idempotent — one per deal) — and dispatch the two public CNIC-verify links
+ * over WhatsApp. Sale snapshots the price + seller/buyer; rental snapshots the
+ * lease terms + landlord/renter. The verification flow is identical either way.
  *
  * Delivery caveat (important): the Meta Cloud API only allows free-form text
  * inside the 24-hour customer-service window (i.e. after the recipient has
@@ -31,37 +33,50 @@ export interface ContractDispatchResult {
 export async function initiateContractPipelines(dealId: string): Promise<ContractDispatchResult> {
   const deal = await prisma.deal.findUnique({
     where: { id: dealId },
-    include: { client: true, property: true, rental: true },
+    include: { client: true, property: true, rental: true, sale: true },
   });
   if (!deal) throw new Error("Deal not found.");
-  if (deal.type !== "RENTAL") throw new Error("Contracts can only run for rental deals.");
+
+  // The two parties read as seller/buyer for a sale, landlord/renter for a lease.
+  const isSale = deal.type === "SALE";
+  const partyA = isSale ? "Seller" : "Landlord";
+  const partyB = isSale ? "Buyer" : "Renter";
 
   // Deduplicate: one contract per deal (dealId is unique).
   let contract = await prisma.contract.findUnique({ where: { dealId } });
   if (!contract) {
-    const rental = deal.rental;
-    const months = rental?.leaseMonths ?? 11; // common Pakistan lease length
-    const start = new Date();
-    const end = new Date(start);
-    end.setMonth(end.getMonth() + months);
-
-    contract = await prisma.contract.create({
-      data: {
-        companyId: deal.companyId,
-        dealId: deal.id,
-        // Snapshot the rental terms so later deal edits don't rewrite the record.
-        monthlyRent: rental?.monthlyRent ?? new Prisma.Decimal(0),
-        deposit: rental?.deposit ?? new Prisma.Decimal(0),
-        leaseMonths: months,
-        startDate: start,
-        endDate: end,
-        // Best-available identifiers (see schema note): landlord = owner phone,
-        // renter = Client id.
-        landlordId: deal.property.ownerPhone ?? null,
-        renterId: deal.clientId ?? null,
-        status: "AWAITING_CNIC_LANDLORD",
-      },
-    });
+    // Snapshot the deal's terms so later edits don't rewrite the legal record.
+    // Best-available identifiers (see schema note): party A = owner phone,
+    // party B = Client id.
+    const base = {
+      companyId: deal.companyId,
+      dealId: deal.id,
+      landlordId: deal.property.ownerPhone ?? null,
+      renterId: deal.clientId ?? null,
+      status: "AWAITING_CNIC_LANDLORD" as const,
+    };
+    if (isSale) {
+      contract = await prisma.contract.create({
+        data: { ...base, type: "SALE", salePrice: deal.sale?.salePrice ?? new Prisma.Decimal(0) },
+      });
+    } else {
+      const rental = deal.rental;
+      const months = rental?.leaseMonths ?? 11; // common Pakistan lease length
+      const start = new Date();
+      const end = new Date(start);
+      end.setMonth(end.getMonth() + months);
+      contract = await prisma.contract.create({
+        data: {
+          ...base,
+          type: "RENTAL",
+          monthlyRent: rental?.monthlyRent ?? new Prisma.Decimal(0),
+          deposit: rental?.deposit ?? new Prisma.Decimal(0),
+          leaseMonths: months,
+          startDate: start,
+          endDate: end,
+        },
+      });
+    }
   }
 
   const landlordLink = `${APP_URL}/verify-identity/${contract.landlordToken}`;
@@ -86,7 +101,7 @@ export async function initiateContractPipelines(dealId: string): Promise<Contrac
   // window, then leave the link for manual sharing. Template body params are
   // positional: {{1}} recipient name, {{2}} property title, {{3}} verify link.
   const sendLink = async (
-    party: "Landlord" | "Renter",
+    party: string,
     phone: string,
     name: string,
     link: string,
@@ -112,29 +127,30 @@ export async function initiateContractPipelines(dealId: string): Promise<Contrac
 
   let landlordSent = false;
   let renterSent = false;
+  const agreementNoun = isSale ? "sale agreement" : "lease";
 
   if (!deal.property.ownerPhone) {
-    warnings.push("No landlord phone on the property — landlord link not sent.");
+    warnings.push(`No ${partyA.toLowerCase()} phone on the property — ${partyA.toLowerCase()} link not sent.`);
   } else {
     landlordSent = await sendLink(
-      "Landlord",
+      partyA,
       deal.property.ownerPhone,
       deal.property.ownerName ?? "there",
       landlordLink,
-      `Assalam-o-Alaikum,\n\nTo complete the lease for "${deal.property.title}", please tap this secure link ` +
+      `Assalam-o-Alaikum,\n\nTo complete the ${agreementNoun} for "${deal.property.title}", please tap this secure link ` +
         `and photograph your CNIC for verification:\n\n${landlordLink}`,
     );
   }
 
   if (!deal.client?.phone) {
-    warnings.push("No renter phone on the client — renter link not sent.");
+    warnings.push(`No ${partyB.toLowerCase()} phone on the client — ${partyB.toLowerCase()} link not sent.`);
   } else {
     renterSent = await sendLink(
-      "Renter",
+      partyB,
       deal.client.phone,
       deal.client.name ?? "there",
       renterLink,
-      `Assalam-o-Alaikum,\n\nTo complete your rental lease verification, please tap this secure link ` +
+      `Assalam-o-Alaikum,\n\nTo complete your ${agreementNoun} verification, please tap this secure link ` +
         `and photograph your CNIC:\n\n${renterLink}`,
     );
   }
