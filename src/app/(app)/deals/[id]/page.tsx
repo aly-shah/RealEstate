@@ -17,11 +17,13 @@ import {
 import { markPaymentPaid } from "@/app/(app)/payments/actions";
 import {
   startContract,
+  generateDealDocuments,
   updateDealForecast,
   toggleChecklistItem,
   addChecklistItem,
   deleteChecklistItem,
 } from "@/app/(app)/deals/actions";
+import { ContractEditor } from "./ContractEditor";
 import { WhatsAppButton } from "@/components/whatsapp/WhatsAppButton";
 import { TEMPLATES } from "@/lib/whatsapp";
 import { closeProbability, winRateCalibration, MIN_CALIBRATION_SAMPLE } from "@/lib/close-probability";
@@ -53,9 +55,10 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
       commission: { include: { shares: true } },
       documents: true,
       checklist: { orderBy: { order: "asc" } },
-      // Only the fields the lease-verification panel renders — never pull the
-      // raw CNIC numbers into the page.
-      contract: { select: { id: true, status: true, landlordVerifiedAt: true, renterVerifiedAt: true } },
+      // Full contract for the office-only verification panel + contract editor.
+      // CNIC numbers reach the client ONLY via the office-gated ContractEditor
+      // below — non-office roles never render it, so it isn't serialised to them.
+      contract: true,
       invoices: {
         include: { payments: { where: { status: "PAID" }, select: { amount: true } } },
         orderBy: { issuedAt: "desc" },
@@ -81,6 +84,29 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
   const closeProb = closeProbability(deal.status, cal.factor);
   const dealClosed = deal.status === "CLOSED_WON" || deal.status === "CLOSED_LOST";
   const decided = cal.won + cal.lost;
+
+  // Pre-filled values for the contract editor — contract snapshot first, falling
+  // back to the live deal terms. Computed here but only passed to the office-only
+  // ContractEditor, so CNIC numbers never reach non-office clients.
+  const ct = deal.contract;
+  const ymd = (d: Date | null | undefined) => (d ? d.toISOString().slice(0, 10) : null);
+  const numOrNull = (x: unknown) => (x == null ? null : toNumber(x as never));
+  const contractValues = {
+    salePrice: numOrNull(ct?.salePrice ?? deal.sale?.salePrice),
+    tokenAmount: numOrNull(ct?.tokenAmount ?? deal.sale?.tokenAmount),
+    downPayment: numOrNull(ct?.downPayment ?? deal.sale?.downPayment),
+    monthlyRent: numOrNull(ct?.monthlyRent ?? deal.rental?.monthlyRent),
+    deposit: numOrNull(ct?.deposit ?? deal.rental?.deposit),
+    leaseMonths: ct?.leaseMonths ?? deal.rental?.leaseMonths ?? null,
+    startDate: ymd(ct?.startDate),
+    endDate: ymd(ct?.endDate),
+    possessionDate: ymd(ct?.possessionDate),
+    landlordCnicName: ct?.landlordCnicName ?? deal.property.ownerName ?? null,
+    landlordCnic: ct?.landlordCnic ?? null,
+    renterCnicName: ct?.renterCnicName ?? deal.client?.name ?? null,
+    renterCnic: ct?.renterCnic ?? null,
+    customClauses: ct?.customClauses ?? null,
+  };
   const suggestedComm = Math.round(value * 0.02);
   const now = new Date();
   const canBill = can(user.role, "managePayments");
@@ -396,6 +422,19 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
                   </form>
                 </>
               )}
+
+              {/* Contract terms editor + document-pack generation. */}
+              <div className="mt-3 space-y-2 border-t border-line-soft pt-3">
+                <ContractEditor dealId={deal.id} isSale={deal.type === "SALE"} values={contractValues} />
+                <form action={generateDealDocuments}>
+                  <input type="hidden" name="dealId" value={deal.id} />
+                  <button className="btn-ghost w-full justify-center text-xs">Generate documents</button>
+                </form>
+                <p className="text-[11px] text-muted">
+                  Generates the {deal.type === "SALE" ? "sale agreement" : "lease agreement"}, receipt and possession note
+                  into the Documents list, filled from the verified details.
+                </p>
+              </div>
             </Section>
           )}
 
@@ -457,8 +496,8 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
             ) : (
               <ul className="space-y-1">
                 {deal.documents.map((d) => (
-                  <li key={d.id} className="flex items-center justify-between text-sm">
-                    <span className="truncate text-ink">{d.name}</span>
+                  <li key={d.id} className="flex items-center justify-between gap-2 text-sm">
+                    <a href={d.url} target="_blank" rel="noopener noreferrer" className="truncate text-ink hover:text-accent">{d.name}</a>
                     <StatusBadge status={d.verification} />
                   </li>
                 ))}

@@ -1033,6 +1033,14 @@ model Contract {
   startDate          DateTime? // RENTAL
   endDate            DateTime? // RENTAL
   salePrice          Decimal?       @db.Decimal(14, 2) // SALE
+  tokenAmount        Decimal?       @db.Decimal(14, 2) // SALE — token / bayana paid
+  downPayment        Decimal?       @db.Decimal(14, 2) // SALE — down payment
+
+  // Operator-editable agreement fields (both types). possessionDate drives the
+  // handover note; customClauses are free-text special terms appended to the
+  // generated agreement.
+  possessionDate     DateTime?
+  customClauses      String?
 
   // Party A verification — "landlord" for RENTAL, "seller" for SALE. landlordId
   // holds the best-available identifier (the property's ownerPhone) — not an FK.

@@ -13,7 +13,8 @@ import { invalidateCompanyMetrics } from "@/lib/metrics";
 import { toNumber, humanize } from "@/lib/format";
 import { setFlash } from "@/lib/flash";
 import { nextDealReference } from "@/lib/refs";
-import { initiateContractPipelines } from "@/lib/contract-service";
+import { initiateContractPipelines, ensureContractForDeal } from "@/lib/contract-service";
+import { syncDealDocuments } from "@/lib/deal-documents";
 
 const dealSchema = z.object({
   propertyId: z.string().min(1, "Property is required"),
@@ -351,6 +352,130 @@ export async function startContract(formData: FormData): Promise<void> {
     }
   } catch (e) {
     await setFlash({ tone: "danger", message: e instanceof Error ? e.message : "Could not start the contract." });
+  }
+  revalidatePath(`/deals/${dealId}`);
+}
+
+/** Generate (or refresh) the deal's printable document pack — agreement,
+ *  receipt and possession note — as Document rows in the Documents tab. */
+export async function generateDealDocuments(formData: FormData): Promise<void> {
+  const user = await requireCompanyUser();
+  if (!can(user.role, "recordDeals")) return;
+
+  const dealId = String(formData.get("dealId") || "");
+  if (!dealId) return;
+  const deal = await prisma.deal.findFirst({
+    where: { id: dealId, companyId: user.companyId },
+    select: { id: true, reference: true },
+  });
+  if (!deal) return;
+
+  try {
+    const count = await syncDealDocuments(dealId);
+    await logActivity({
+      companyId: user.companyId,
+      userId: user.id,
+      action: "documents.generated",
+      entityType: "DEAL",
+      entityId: dealId,
+      summary: `Generated ${count} documents for ${deal.reference}`,
+    });
+    await setFlash({ tone: "ok", message: `Generated ${count} documents — find them in the Documents list.` });
+  } catch (e) {
+    await setFlash({ tone: "danger", message: e instanceof Error ? e.message : "Could not generate documents." });
+  }
+  revalidatePath(`/deals/${dealId}`);
+  revalidatePath("/documents");
+}
+
+const optionalMoney = z.preprocess(
+  (v) => (v === "" || v == null ? undefined : v),
+  z.coerce.number().min(0).max(1_000_000_000_000).optional(),
+);
+const optionalDate = z.preprocess((v) => (v === "" || v == null ? undefined : v), z.string().optional());
+
+const contractSchema = z.object({
+  // SALE terms
+  salePrice: optionalMoney,
+  tokenAmount: optionalMoney,
+  downPayment: optionalMoney,
+  // RENTAL terms
+  monthlyRent: optionalMoney,
+  deposit: optionalMoney,
+  leaseMonths: z.preprocess(
+    (v) => (v === "" || v == null ? undefined : v),
+    z.coerce.number().int().min(0).max(600).optional(),
+  ),
+  startDate: optionalDate,
+  endDate: optionalDate,
+  possessionDate: optionalDate,
+  // Parties (operator can override the OCR-captured identity)
+  landlordCnicName: z.string().max(120).optional(),
+  landlordCnic: z.string().max(20).optional(),
+  renterCnicName: z.string().max(120).optional(),
+  renterCnic: z.string().max(20).optional(),
+  // Free-text special clauses appended to the agreement
+  customClauses: z.string().max(5000).optional(),
+});
+
+/** Operator-edit the contract terms, parties and clauses for a single deal.
+ *  Ensures the contract exists first, so this also works before links are sent. */
+export async function updateContract(formData: FormData): Promise<void> {
+  const user = await requireCompanyUser();
+  if (!can(user.role, "recordDeals")) return;
+
+  const dealId = String(formData.get("dealId") || "");
+  if (!dealId) return;
+  const deal = await prisma.deal.findFirst({
+    where: { id: dealId, companyId: user.companyId },
+    select: { id: true },
+  });
+  if (!deal) return;
+
+  const parsed = contractSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) {
+    await setFlash({ tone: "danger", message: parsed.error.issues[0]?.message ?? "Invalid contract input." });
+    revalidatePath(`/deals/${dealId}`);
+    return;
+  }
+  const d = parsed.data;
+
+  try {
+    await ensureContractForDeal(dealId);
+    const dec = (n: number | undefined) => (n == null ? null : new Prisma.Decimal(n));
+    const date = (s: string | undefined) => (s ? new Date(s) : null);
+    const text = (s: string | undefined) => (s && s.trim() ? s.trim() : null);
+
+    await prisma.contract.update({
+      where: { dealId },
+      data: {
+        salePrice: dec(d.salePrice),
+        tokenAmount: dec(d.tokenAmount),
+        downPayment: dec(d.downPayment),
+        monthlyRent: dec(d.monthlyRent),
+        deposit: dec(d.deposit),
+        leaseMonths: d.leaseMonths ?? null,
+        startDate: date(d.startDate),
+        endDate: date(d.endDate),
+        possessionDate: date(d.possessionDate),
+        landlordCnicName: text(d.landlordCnicName),
+        landlordCnic: text(d.landlordCnic),
+        renterCnicName: text(d.renterCnicName),
+        renterCnic: text(d.renterCnic),
+        customClauses: text(d.customClauses),
+      },
+    });
+    await logActivity({
+      companyId: user.companyId,
+      userId: user.id,
+      action: "contract.updated",
+      entityType: "DEAL",
+      entityId: dealId,
+      summary: `Edited contract terms for deal ${dealId}`,
+    });
+    await setFlash({ tone: "ok", message: "Contract updated. Regenerate the documents to apply the changes." });
+  } catch (e) {
+    await setFlash({ tone: "danger", message: e instanceof Error ? e.message : "Could not update the contract." });
   }
   revalidatePath(`/deals/${dealId}`);
 }

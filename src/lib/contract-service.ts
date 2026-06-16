@@ -30,6 +30,61 @@ export interface ContractDispatchResult {
   warnings: string[];
 }
 
+/**
+ * Ensure a deal has its Contract (snapshotting the deal's terms), creating it if
+ * missing. Idempotent — one contract per deal (dealId is unique). Does NOT send
+ * any WhatsApp links, so it's safe to call from document generation as well as
+ * from the verify-link pipeline below.
+ */
+export async function ensureContractForDeal(dealId: string) {
+  const existing = await prisma.contract.findUnique({ where: { dealId } });
+  if (existing) return existing;
+
+  const deal = await prisma.deal.findUnique({
+    where: { id: dealId },
+    include: { property: true, rental: true, sale: true },
+  });
+  if (!deal) throw new Error("Deal not found.");
+
+  // Snapshot the deal's terms so later edits don't rewrite the legal record.
+  // Best-available identifiers (see schema note): party A = owner phone (seller/
+  // landlord), party B = Client id (buyer/renter).
+  const base = {
+    companyId: deal.companyId,
+    dealId: deal.id,
+    landlordId: deal.property.ownerPhone ?? null,
+    renterId: deal.clientId ?? null,
+    status: "AWAITING_CNIC_LANDLORD" as const,
+  };
+  if (deal.type === "SALE") {
+    return prisma.contract.create({
+      data: {
+        ...base,
+        type: "SALE",
+        salePrice: deal.sale?.salePrice ?? new Prisma.Decimal(0),
+        tokenAmount: deal.sale?.tokenAmount ?? null,
+        downPayment: deal.sale?.downPayment ?? null,
+      },
+    });
+  }
+  const rental = deal.rental;
+  const months = rental?.leaseMonths ?? 11; // common Pakistan lease length
+  const start = new Date();
+  const end = new Date(start);
+  end.setMonth(end.getMonth() + months);
+  return prisma.contract.create({
+    data: {
+      ...base,
+      type: "RENTAL",
+      monthlyRent: rental?.monthlyRent ?? new Prisma.Decimal(0),
+      deposit: rental?.deposit ?? new Prisma.Decimal(0),
+      leaseMonths: months,
+      startDate: start,
+      endDate: end,
+    },
+  });
+}
+
 export async function initiateContractPipelines(dealId: string): Promise<ContractDispatchResult> {
   const deal = await prisma.deal.findUnique({
     where: { id: dealId },
@@ -42,42 +97,7 @@ export async function initiateContractPipelines(dealId: string): Promise<Contrac
   const partyA = isSale ? "Seller" : "Landlord";
   const partyB = isSale ? "Buyer" : "Renter";
 
-  // Deduplicate: one contract per deal (dealId is unique).
-  let contract = await prisma.contract.findUnique({ where: { dealId } });
-  if (!contract) {
-    // Snapshot the deal's terms so later edits don't rewrite the legal record.
-    // Best-available identifiers (see schema note): party A = owner phone,
-    // party B = Client id.
-    const base = {
-      companyId: deal.companyId,
-      dealId: deal.id,
-      landlordId: deal.property.ownerPhone ?? null,
-      renterId: deal.clientId ?? null,
-      status: "AWAITING_CNIC_LANDLORD" as const,
-    };
-    if (isSale) {
-      contract = await prisma.contract.create({
-        data: { ...base, type: "SALE", salePrice: deal.sale?.salePrice ?? new Prisma.Decimal(0) },
-      });
-    } else {
-      const rental = deal.rental;
-      const months = rental?.leaseMonths ?? 11; // common Pakistan lease length
-      const start = new Date();
-      const end = new Date(start);
-      end.setMonth(end.getMonth() + months);
-      contract = await prisma.contract.create({
-        data: {
-          ...base,
-          type: "RENTAL",
-          monthlyRent: rental?.monthlyRent ?? new Prisma.Decimal(0),
-          deposit: rental?.deposit ?? new Prisma.Decimal(0),
-          leaseMonths: months,
-          startDate: start,
-          endDate: end,
-        },
-      });
-    }
-  }
+  const contract = await ensureContractForDeal(dealId);
 
   const landlordLink = `${APP_URL}/verify-identity/${contract.landlordToken}`;
   const renterLink = `${APP_URL}/verify-identity/${contract.renterToken}`;
