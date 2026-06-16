@@ -10,19 +10,9 @@ import {
   sweepWhatsAppTemplateCatalog,
   sweepPaymentReminders,
 } from "@/lib/jobs/sweeps";
+import { claimDailySweep } from "@/lib/jobs/throttle";
 
 export const runtime = "nodejs";
-
-// Daily-throttle markers — per-process. Single PM2 fork means one run
-// per day. Safe because the underlying sweeps are idempotent / no-op
-// when there's nothing to do.
-const DAILY_INTERVAL_MS = 24 * 60 * 60 * 1000;
-const g = globalThis as unknown as {
-  __lastPurgeAt?: number;
-  __lastWhatsAppProbeAt?: number;
-  __lastWhatsAppCatalogAt?: number;
-  __lastPaymentReminderAt?: number;
-};
 
 /**
  * Cron-driven entry point that drains the job queue + runs always-on sweeps.
@@ -67,24 +57,21 @@ export async function POST(req: NextRequest) {
   let waProbe: Awaited<ReturnType<typeof sweepWhatsAppTokens>> | null = null;
   let waCatalog: Awaited<ReturnType<typeof sweepWhatsAppTemplateCatalog>> | null = null;
   let paymentReminders: Awaited<ReturnType<typeof sweepPaymentReminders>> | null = null;
-  const now = Date.now();
-  if (!g.__lastPurgeAt || now - g.__lastPurgeAt >= DAILY_INTERVAL_MS) {
+  // Daily-throttled sweeps — each claimed at most once per 24h via a durable
+  // marker (SweepState), so a PM2 restart / redeploy can't re-fire them.
+  if (await claimDailySweep("purge")) {
     purge = await purgeOldRows();
-    g.__lastPurgeAt = now;
   }
-  if (!g.__lastPaymentReminderAt || now - g.__lastPaymentReminderAt >= DAILY_INTERVAL_MS) {
+  if (await claimDailySweep("payment-reminders")) {
     paymentReminders = await sweepPaymentReminders();
-    g.__lastPaymentReminderAt = now;
   }
-  if (!g.__lastWhatsAppProbeAt || now - g.__lastWhatsAppProbeAt >= DAILY_INTERVAL_MS) {
-    // Token probe + catalog refresh share the same daily throttle. Both
-    // sweeps early-return when no tenant has WhatsApp configured.
+  if (await claimDailySweep("whatsapp-tokens")) {
+    // Token probe + catalog refresh both early-return when no tenant has
+    // WhatsApp configured.
     waProbe = await sweepWhatsAppTokens();
-    g.__lastWhatsAppProbeAt = now;
   }
-  if (!g.__lastWhatsAppCatalogAt || now - g.__lastWhatsAppCatalogAt >= DAILY_INTERVAL_MS) {
+  if (await claimDailySweep("whatsapp-catalog")) {
     waCatalog = await sweepWhatsAppTemplateCatalog();
-    g.__lastWhatsAppCatalogAt = now;
   }
 
   return NextResponse.json({

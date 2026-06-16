@@ -1353,6 +1353,15 @@ model Notification {
 //
 // companyId is nullable: platform-level jobs (e.g. cross-tenant trial sweep)
 // pass null; tenant-scoped jobs (per-company AI runs) set it.
+/// Durable last-run marker for the daily-throttled cron sweeps (purge, payment
+/// reminders, WhatsApp token/catalog). Replaces per-process globals so a PM2
+/// restart / deploy no longer re-fires a daily sweep within its 24h window.
+model SweepState {
+  key       String   @id // e.g. "payment-reminders", "purge"
+  lastRunAt DateTime
+  updatedAt DateTime @default(now()) @updatedAt
+}
+
 model Job {
   id           String    @id @default(cuid())
   companyId    String?
