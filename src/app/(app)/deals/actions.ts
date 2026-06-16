@@ -484,10 +484,22 @@ const docOverrideSchema = z.object({
   dealId: z.string().min(1),
   kind: z.string().min(1),
   mode: z.enum(["append", "replace"]),
-  text: z.string().max(20000).optional(),
+  text: z.string().max(200_000).optional(),
 });
 
 type DocOverride = { mode: "append" | "replace"; text: string };
+
+/** Strip the obviously-dangerous bits before we store + re-render edited document
+ *  HTML. The editor is office-only and same-tenant, but this defends against a
+ *  pasted <script>/handler/javascript: URL surviving into the rendered page. */
+function sanitizeDocHtml(html: string): string {
+  return html
+    .replace(/<\/?(script|style|link|iframe|object|embed|meta|base|form|input|button)\b[^>]*>/gi, "")
+    .replace(/\son\w+\s*=\s*"[^"]*"/gi, "")
+    .replace(/\son\w+\s*=\s*'[^']*'/gi, "")
+    .replace(/\son\w+\s*=\s*[^\s>]+/gi, "")
+    .replace(/(href|src)\s*=\s*("|')\s*javascript:[^"']*\2/gi, '$1="#"');
+}
 
 /** Set (or clear) a per-document free-text override — append to or replace the
  *  standard body of one generated document. Stored as a JSON map on the
@@ -510,7 +522,7 @@ export async function setDocumentOverride(formData: FormData): Promise<void> {
   const contract = await ensureContractForDeal(d.dealId);
   const map: Record<string, DocOverride> = { ...((contract.documentOverrides as Record<string, DocOverride> | null) ?? {}) };
 
-  const text = (d.text ?? "").trim();
+  const text = sanitizeDocHtml((d.text ?? "").trim());
   if (text) map[d.kind] = { mode: d.mode, text };
   else delete map[d.kind]; // empty text → revert to the standard template
 
