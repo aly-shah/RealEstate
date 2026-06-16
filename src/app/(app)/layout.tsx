@@ -7,7 +7,7 @@ import { Topbar } from "@/components/shell/Topbar";
 import { AgentBottomNav } from "@/components/shell/AgentBottomNav";
 import { Toaster } from "@/components/ui/Toaster";
 import { getDict } from "@/lib/i18n/server";
-import { consumeFlash } from "@/lib/flash";
+import { readFlash } from "@/lib/flash";
 
 export default async function AppLayout({
   children,
@@ -22,9 +22,9 @@ export default async function AppLayout({
       ? prisma.company.findUnique({ where: { id: user.companyId }, select: { name: true } })
       : null,
     prisma.notification.count({ where: { userId: user.id, read: false } }),
-    // Drains the flash cookie set by any recent server action so the Toaster
-    // can show it once and move on.
-    consumeFlash(),
+    // Reads the flash cookie set by any recent server action so the Toaster can
+    // show it; the Toaster clears the cookie client-side (render can't write it).
+    readFlash(),
   ]);
 
   const isAgent = user.role === "AGENT";
@@ -55,7 +55,8 @@ export default async function AppLayout({
         </main>
       </div>
       {isAgent && <AgentBottomNav unreadCount={unreadCount} dict={dict} />}
-      <Toaster initial={flash} />
+      {/* key per flash → fresh mount per message (no setState-in-effect sync). */}
+      <Toaster key={flash ? `${flash.tone}:${flash.message}` : "none"} initial={flash} />
     </div>
   );
 }

@@ -20,10 +20,14 @@ const TONES: Record<FlashTone, { border: string; bg: string; text: string; dot: 
  * (the rare-enough case where queueing would add code without UX win).
  */
 export function Toaster({ initial }: { initial: FlashMessage | null }) {
+  // The layout remounts this per flash (via key), so initial state is the flash.
   const [toast, setToast] = useState<FlashMessage | null>(initial);
 
+  // Clear the flash cookie client-side so it shows once. The server can't clear
+  // it (Next 16 forbids cookie writes during the layout render), so the cookie is
+  // non-httpOnly and expired here right after it's read. Pure side effect.
   useEffect(() => {
-    setToast(initial);
+    if (initial) document.cookie = "pz-flash=; Max-Age=0; path=/";
   }, [initial]);
 
   useEffect(() => {
