@@ -7,6 +7,7 @@ import { money, fmtDate, fmtDateTime, toNumber } from "@/lib/format";
 import { Brand } from "@/components/ui/Brand";
 import { PrintButton } from "@/components/PrintButton";
 import { ALL_DEAL_DOC_KINDS, type DealDocKind } from "@/lib/deal-documents";
+import { documentPlainText } from "@/lib/document-text";
 import { setDocumentOverride } from "@/app/(app)/deals/actions";
 
 /**
@@ -86,6 +87,20 @@ export default async function DealDocumentPage({
   const doAppend = ovMode === "append" && ovText.length > 0;
 
   const propLine = [deal.property.address, deal.property.area, deal.property.city].filter(Boolean).join(", ");
+
+  // The document's current text, as editable plain text — the override text when
+  // one is set, otherwise the standard rendering. Pre-fills the editor so the
+  // operator tweaks the existing text instead of rewriting it.
+  const standardText = documentPlainText(kind, {
+    isSale,
+    partyA: { name: partyA.name, cnic: partyA.cnic, phone: partyA.phone },
+    partyB: { name: partyB.name, cnic: partyB.cnic, phone: partyB.phone },
+    t,
+    property: { title: deal.property.title, reference: deal.property.reference },
+    propLine,
+  });
+  const editorText = ovText || standardText;
+
   const TITLES: Record<DealDocKind, string> = {
     agreement: isSale ? "Agreement to Sell" : "Rental / Lease Agreement",
     "sale-deed": "Sale Deed (Transfer of Ownership)",
@@ -109,38 +124,41 @@ export default async function DealDocumentPage({
           <PrintButton />
         </div>
 
-        {/* Office-only inline editor — append to or replace this document's body. */}
+        {/* Office-only inline editor — the document's text, pre-filled and
+            editable. Tweak it and save; the document renders exactly what's here. */}
         <section className="mb-4 rounded-xl border border-line bg-paper p-4 print:hidden">
           <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-ink">Customize this document</h2>
-            {ovText ? <span className="chip border-accent/25 bg-accent-wash text-accent">Custom text applied · {ovMode}</span> : null}
+            <h2 className="text-sm font-semibold text-ink">Edit this document</h2>
+            {ovText ? <span className="chip border-accent/25 bg-accent-wash text-accent">Edited</span> : null}
           </div>
+          <p className="mb-2 text-xs text-muted">
+            This is the document&rsquo;s text — edit any part of it and save. To go back to the auto-generated
+            version (which stays in sync with the deal&rsquo;s terms), use “Reset to standard”.
+          </p>
           <form action={setDocumentOverride} className="space-y-3">
             <input type="hidden" name="dealId" value={deal.id} />
             <input type="hidden" name="kind" value={kind} />
-            <div>
-              <label className="label" htmlFor="mode">Mode</label>
-              <select id="mode" name="mode" className="field" defaultValue={ovMode}>
-                <option value="append">Append to the standard text</option>
-                <option value="replace">Replace the standard body</option>
-              </select>
-            </div>
-            <div>
-              <label className="label" htmlFor="text">Custom text</label>
-              <textarea
-                id="text"
-                name="text"
-                rows={8}
-                className="field"
-                defaultValue={ovText}
-                placeholder="Type the additional clauses, or the full document text to replace the standard body…"
-              />
-            </div>
-            <div className="flex items-center gap-3">
-              <button type="submit" className="btn-primary">Save &amp; apply</button>
-              <span className="text-xs text-muted">Clear the text and save to revert to the standard template.</span>
+            <input type="hidden" name="mode" value="replace" />
+            <textarea
+              id="text"
+              name="text"
+              rows={20}
+              className="field font-mono text-xs leading-relaxed"
+              defaultValue={editorText}
+            />
+            <div className="flex items-center gap-2">
+              <button type="submit" className="btn-primary">Save changes</button>
             </div>
           </form>
+          {ovText && (
+            <form action={setDocumentOverride} className="mt-2">
+              <input type="hidden" name="dealId" value={deal.id} />
+              <input type="hidden" name="kind" value={kind} />
+              <input type="hidden" name="mode" value="replace" />
+              <input type="hidden" name="text" value="" />
+              <button type="submit" className="btn-ghost text-xs text-danger">Reset to standard</button>
+            </form>
+          )}
         </section>
 
         <article className="rounded-lg border border-line bg-white p-10 text-[13px] leading-relaxed text-ink print:border-0 print:p-0">
