@@ -110,11 +110,12 @@ export default async function DealDocumentPage({
         </div>
 
         {/* Office-only inline editor — append to or replace this document's body. */}
-        <details className="mb-4 rounded-xl border border-line bg-paper p-3 print:hidden" {...(ovText ? { open: true } : {})}>
-          <summary className="cursor-pointer text-sm font-medium text-ink">
-            Customize this document{ovText ? <span className="ml-2 text-xs font-normal text-accent">(custom text applied · {ovMode})</span> : null}
-          </summary>
-          <form action={setDocumentOverride} className="mt-3 space-y-3">
+        <section className="mb-4 rounded-xl border border-line bg-paper p-4 print:hidden">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-ink">Customize this document</h2>
+            {ovText ? <span className="chip border-accent/25 bg-accent-wash text-accent">Custom text applied · {ovMode}</span> : null}
+          </div>
+          <form action={setDocumentOverride} className="space-y-3">
             <input type="hidden" name="dealId" value={deal.id} />
             <input type="hidden" name="kind" value={kind} />
             <div>
@@ -130,17 +131,17 @@ export default async function DealDocumentPage({
                 id="text"
                 name="text"
                 rows={8}
-                className="field font-[inherit]"
+                className="field"
                 defaultValue={ovText}
                 placeholder="Type the additional clauses, or the full document text to replace the standard body…"
               />
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-3">
               <button type="submit" className="btn-primary">Save &amp; apply</button>
               <span className="text-xs text-muted">Clear the text and save to revert to the standard template.</span>
             </div>
           </form>
-        </details>
+        </section>
 
         <article className="rounded-lg border border-line bg-white p-10 text-[13px] leading-relaxed text-ink print:border-0 print:p-0">
           {/* Letterhead */}
