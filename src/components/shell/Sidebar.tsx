@@ -50,7 +50,9 @@ export function Sidebar({ items, companyName, roleLabel, unreadCount = 0, dict }
   const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
+    // Sync the persisted collapse preference on mount (client-only value).
     const saved = localStorage.getItem("pz-sidebar-collapsed") === "1";
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setCollapsed(saved);
     document.documentElement.classList.toggle("sidebar-collapsed", saved);
   }, []);
@@ -94,12 +96,13 @@ export function Sidebar({ items, companyName, roleLabel, unreadCount = 0, dict }
       </div>
 
       <aside
-        className={`${open ? "block" : "hidden"} border-b border-line bg-paper transition-[width] lg:fixed lg:inset-y-0 lg:start-0 lg:z-40 lg:block lg:w-[var(--sidebar-w)] lg:border-b-0 lg:border-e`}
+        className={`${open ? "block" : "hidden"} border-b border-white/10 text-slate-300 transition-[width] lg:fixed lg:inset-y-0 lg:start-0 lg:z-40 lg:block lg:w-[var(--sidebar-w)] lg:border-b-0 lg:border-e`}
+        style={{ backgroundImage: "var(--gradient-sidebar)", backgroundColor: "#15132c" }}
       >
         <div className="flex h-full flex-col">
           {/* Brand row */}
           <div className="hidden h-16 items-center px-4 lg:flex">
-            <span className="nav-label"><Brand /></span>
+            <span className="nav-label"><Brand variant="dark" /></span>
             <span
               className={`${collapsed ? "grid" : "hidden"} h-9 w-9 place-items-center overflow-hidden rounded-xl bg-accent text-white shadow-[var(--shadow-soft)]`}
               style={{ backgroundImage: "var(--gradient-brand)" }}
@@ -115,20 +118,20 @@ export function Sidebar({ items, companyName, roleLabel, unreadCount = 0, dict }
 
           {/* Company / role card */}
           <div className="nav-label px-4 pb-3 pt-1 lg:pt-0">
-            <div className="rounded-xl border border-line bg-canvas/60 px-3 py-2.5">
-              <p className="truncate text-sm font-semibold text-ink">{companyName}</p>
-              <p className="truncate text-xs text-muted">{roleLabel}</p>
+            <div className="rounded-xl border border-white/10 bg-white/[0.06] px-3 py-2.5 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05)]">
+              <p className="truncate text-sm font-semibold text-white">{companyName}</p>
+              <p className="truncate text-xs text-slate-400">{roleLabel}</p>
             </div>
           </div>
 
           {/* Nav */}
-          <nav className="pz-scroll flex-1 space-y-4 overflow-y-auto px-3 pb-4">
+          <nav className="pz-scroll flex-1 space-y-5 overflow-y-auto px-3 pb-4">
             {grouped.map((section, gi) => (
               <div key={`${section.group}-${gi}`}>
-                <p className="nav-group-label px-3 pb-1.5 pt-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted">
+                <p className="nav-group-label px-3 pb-1.5 pt-1 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">
                   {dict.groups[section.group as keyof Dict["groups"]] ?? section.group}
                 </p>
-                <div className="space-y-0.5">
+                <div className="space-y-1">
                   {section.items.map((item) => {
                     const active = isActive(item.href);
                     return (
@@ -137,25 +140,25 @@ export function Sidebar({ items, companyName, roleLabel, unreadCount = 0, dict }
                         href={item.href}
                         onClick={() => setOpen(false)}
                         title={navLabel(item, dict)}
-                        className={`group relative flex items-center gap-3 rounded-xl px-3 py-2 text-sm transition ${
+                        className={`group relative flex items-center gap-3 rounded-xl px-2.5 py-2 text-sm transition ${
                           active
-                            ? "bg-accent-wash font-semibold text-accent"
-                            : "text-slate hover:bg-subtle hover:text-ink"
+                            ? "font-semibold text-white shadow-[0_10px_22px_-10px_rgba(79,70,229,0.85)] ring-1 ring-white/10"
+                            : "text-slate-300 hover:bg-white/[0.07] hover:text-white"
                         }`}
+                        style={active ? { backgroundImage: "var(--gradient-brand)" } : undefined}
                       >
-                        {active && (
-                          <span className="absolute start-0 top-2 bottom-2 w-1 rounded-e-full brand-gradient" />
-                        )}
                         <span className={`grid h-8 w-8 place-items-center rounded-lg transition ${
                           active
-                            ? "bg-white text-accent shadow-[var(--shadow-card)]"
-                            : "text-muted group-hover:text-slate"
+                            ? "bg-white/15 text-white"
+                            : "text-slate-400 group-hover:text-white"
                         }`}>
                           <Icon name={item.icon} className="h-[18px] w-[18px]" />
                         </span>
                         <span className="nav-label flex-1 truncate">{navLabel(item, dict)}</span>
                         {item.href === "/notifications" && unreadCount > 0 && (
-                          <span className="nav-label ms-auto inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-danger px-1.5 text-[10px] font-semibold text-white">
+                          <span className={`nav-label ms-auto inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[10px] font-bold ${
+                            active ? "bg-white/25 text-white" : "bg-danger text-white"
+                          }`}>
                             {unreadCount > 9 ? "9+" : unreadCount}
                           </span>
                         )}
@@ -167,10 +170,10 @@ export function Sidebar({ items, companyName, roleLabel, unreadCount = 0, dict }
             ))}
           </nav>
 
-          <div className="border-t border-line p-3">
+          <div className="border-t border-white/10 p-3">
             <button
               onClick={toggleCollapse}
-              className="hidden w-full items-center gap-3 rounded-xl px-3 py-2 text-sm text-muted transition hover:bg-subtle hover:text-ink lg:flex"
+              className="hidden w-full items-center gap-3 rounded-xl px-2.5 py-2 text-sm text-slate-400 transition hover:bg-white/[0.07] hover:text-white lg:flex"
             >
               <span className="grid h-8 w-8 place-items-center rounded-lg">
                 <Icon name={collapsed ? "chevron-right" : "chevron-left"} className="h-[18px] w-[18px] rtl:rotate-180" />
@@ -181,7 +184,7 @@ export function Sidebar({ items, companyName, roleLabel, unreadCount = 0, dict }
               <button
                 type="submit"
                 title={dict.shell.signOut}
-                className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm text-slate transition hover:bg-danger/10 hover:text-danger"
+                className="flex w-full items-center gap-3 rounded-xl px-2.5 py-2 text-sm text-slate-400 transition hover:bg-red-500/15 hover:text-red-300"
               >
                 <span className="grid h-8 w-8 place-items-center rounded-lg">
                   <Icon name="power" className="h-[18px] w-[18px]" />

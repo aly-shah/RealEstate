@@ -16,7 +16,7 @@ interface TopbarProps {
 /** Glass app header: global search (⌘K), language toggle, notifications, user menu. */
 export function Topbar({ unreadCount = 0, name, roleLabel, canManage, locale, dict }: TopbarProps) {
   return (
-    <header className="sticky top-0 z-30 hidden h-16 items-center gap-3 border-b border-line/70 bg-paper/70 px-6 backdrop-blur-xl lg:flex lg:px-10">
+    <header className="sticky top-0 z-30 hidden h-16 items-center gap-3 border-b border-line/70 bg-paper/75 px-6 shadow-[0_1px_24px_-12px_rgba(15,23,42,0.18)] backdrop-blur-xl lg:flex lg:px-10">
       <div className="flex-1">
         <GlobalSearch dict={dict} />
       </div>

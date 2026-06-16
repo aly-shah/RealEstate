@@ -58,6 +58,11 @@
   --gradient-mesh:
     radial-gradient(900px 360px at 12% -10%, rgba(99,102,241,0.10), transparent 60%),
     radial-gradient(700px 280px at 95% 0%, rgba(14,165,233,0.08), transparent 60%);
+
+  /* Premium dark sidebar — deep indigo-ink with a faint sapphire wash at top. */
+  --gradient-sidebar:
+    radial-gradient(420px 200px at 18% -6%, rgba(99,102,241,0.22), transparent 70%),
+    linear-gradient(180deg, #1b1936 0%, #15132c 52%, #100e22 100%);
 }
 
 html {
