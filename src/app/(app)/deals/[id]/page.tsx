@@ -107,6 +107,14 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
     renterCnic: ct?.renterCnic ?? null,
     customClauses: ct?.customClauses ?? null,
   };
+
+  // Split the deal's documents into the generated agreement pack (printable
+  // routes) and manually-uploaded files, so the pack gets its own tidy block.
+  const PACK_ORDER = ["agreement", "receipt", "possession"];
+  const generatedDocs = deal.documents
+    .filter((d) => d.url.startsWith("/deal-documents/"))
+    .sort((a, b) => PACK_ORDER.findIndex((k) => a.url.endsWith(k)) - PACK_ORDER.findIndex((k) => b.url.endsWith(k)));
+  const uploadedDocs = deal.documents.filter((d) => !d.url.startsWith("/deal-documents/"));
   const suggestedComm = Math.round(value * 0.02);
   const now = new Date();
   const canBill = can(user.role, "managePayments");
@@ -423,17 +431,10 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
                 </>
               )}
 
-              {/* Contract terms editor + document-pack generation. */}
-              <div className="mt-3 space-y-2 border-t border-line-soft pt-3">
+              {/* Edit the contract terms / parties / clauses. The generated
+                  document pack lives in the Documents section below. */}
+              <div className="mt-3 border-t border-line-soft pt-3">
                 <ContractEditor dealId={deal.id} isSale={deal.type === "SALE"} values={contractValues} />
-                <form action={generateDealDocuments}>
-                  <input type="hidden" name="dealId" value={deal.id} />
-                  <button className="btn-ghost w-full justify-center text-xs">Generate documents</button>
-                </form>
-                <p className="text-[11px] text-muted">
-                  Generates the {deal.type === "SALE" ? "sale agreement" : "lease agreement"}, receipt and possession note
-                  into the Documents list, filled from the verified details.
-                </p>
               </div>
             </Section>
           )}
@@ -491,18 +492,53 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
           </Section>
 
           <Section title="Documents">
-            {deal.documents.length === 0 ? (
-              <p className="text-sm text-muted">No documents attached.</p>
-            ) : (
-              <ul className="space-y-1">
-                {deal.documents.map((d) => (
-                  <li key={d.id} className="flex items-center justify-between gap-2 text-sm">
-                    <a href={d.url} target="_blank" rel="noopener noreferrer" className="truncate text-ink hover:text-accent">{d.name}</a>
-                    <StatusBadge status={d.verification} />
-                  </li>
-                ))}
-              </ul>
-            )}
+            <div className="space-y-4">
+              {office && (
+                <div>
+                  <div className="mb-2 flex items-center justify-between">
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Agreement pack</p>
+                    <form action={generateDealDocuments}>
+                      <input type="hidden" name="dealId" value={deal.id} />
+                      <button className="text-xs font-semibold text-accent">{generatedDocs.length ? "Regenerate" : "Generate"}</button>
+                    </form>
+                  </div>
+                  {generatedDocs.length === 0 ? (
+                    <p className="text-sm text-muted">
+                      Not generated yet — create the {deal.type === "SALE" ? "sale agreement" : "lease agreement"}, receipt
+                      and possession note, auto-filled from the deal &amp; verified CNICs.
+                    </p>
+                  ) : (
+                    <ul className="space-y-1.5">
+                      {generatedDocs.map((d) => (
+                        <li key={d.id} className="flex items-center justify-between gap-2 rounded-lg border border-line bg-paper px-3 py-2 text-sm">
+                          <span className="truncate font-medium text-ink">{d.name}</span>
+                          <div className="flex shrink-0 items-center gap-2">
+                            <StatusBadge status={d.verification} />
+                            <a href={d.url} target="_blank" rel="noopener noreferrer" className="text-xs font-semibold text-accent">Open / Print →</a>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+
+              {uploadedDocs.length > 0 ? (
+                <div>
+                  {office && <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted">Other documents</p>}
+                  <ul className="space-y-1">
+                    {uploadedDocs.map((d) => (
+                      <li key={d.id} className="flex items-center justify-between gap-2 text-sm">
+                        <a href={d.url} target="_blank" rel="noopener noreferrer" className="truncate text-ink hover:text-accent">{d.name}</a>
+                        <StatusBadge status={d.verification} />
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : (
+                !office && <p className="text-sm text-muted">No documents attached.</p>
+              )}
+            </div>
           </Section>
 
           <div className="surface p-4 text-center">
