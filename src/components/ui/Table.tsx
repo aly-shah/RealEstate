@@ -9,9 +9,9 @@ export function Table({ head, children }: TableProps) {
     <div className="surface overflow-x-auto">
       <table className="w-full border-collapse text-sm">
         <thead>
-          <tr className="border-b border-line bg-canvas/60 text-left text-[10px] uppercase tracking-[0.14em] text-muted">
+          <tr className="border-b border-line bg-gradient-to-b from-canvas/80 to-canvas/40 text-left text-[10px] uppercase tracking-[0.16em] text-muted">
             {head.map((h, i) => (
-              <th key={i} className="whitespace-nowrap px-4 py-3 font-semibold">
+              <th key={i} className="whitespace-nowrap px-4 py-3.5 font-bold">
                 {h}
               </th>
             ))}
