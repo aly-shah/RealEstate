@@ -19,7 +19,9 @@ export type DealDocKind =
   | "receipt"
   | "possession"
   | "noc"
-  | "affidavit";
+  | "affidavit"
+  | "power-of-attorney"
+  | "tax-certificate";
 
 /** Canonical order — also used to sort the pack in the UI. */
 export const ALL_DEAL_DOC_KINDS: DealDocKind[] = [
@@ -30,12 +32,14 @@ export const ALL_DEAL_DOC_KINDS: DealDocKind[] = [
   "possession",
   "noc",
   "affidavit",
+  "power-of-attorney",
+  "tax-certificate",
 ];
 
 /** The documents generated for a deal, in order — varies by type. */
 export function dealDocKinds(isSale: boolean): DealDocKind[] {
   return isSale
-    ? ["agreement", "sale-deed", "payment-plan", "receipt", "possession", "noc", "affidavit"]
+    ? ["agreement", "sale-deed", "payment-plan", "receipt", "possession", "noc", "affidavit", "power-of-attorney", "tax-certificate"]
     : ["agreement", "receipt", "possession", "noc", "affidavit"];
 }
 
@@ -57,6 +61,10 @@ export function dealDocMeta(kind: DealDocKind, isSale: boolean): { type: Documen
       return { type: "OTHER", name: "No Objection Certificate" };
     case "affidavit":
       return { type: "OTHER", name: isSale ? "Seller's Affidavit" : "Tenant Undertaking" };
+    case "power-of-attorney":
+      return { type: "OTHER", name: "Power of Attorney" };
+    case "tax-certificate":
+      return { type: "OTHER", name: "Tax / FBR Certificate" };
   }
 }
 

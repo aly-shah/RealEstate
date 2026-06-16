@@ -24,12 +24,14 @@
 
 import { PrismaClient, type DocumentType } from "@prisma/client";
 
-type DocKind = "agreement" | "sale-deed" | "payment-plan" | "receipt" | "possession" | "noc" | "affidavit";
+type DocKind =
+  | "agreement" | "sale-deed" | "payment-plan" | "receipt" | "possession"
+  | "noc" | "affidavit" | "power-of-attorney" | "tax-certificate";
 
 // Mirrors lib/deal-documents.ts dealDocKinds() — the set differs by deal type.
 function kindsFor(isSale: boolean): DocKind[] {
   return isSale
-    ? ["agreement", "sale-deed", "payment-plan", "receipt", "possession", "noc", "affidavit"]
+    ? ["agreement", "sale-deed", "payment-plan", "receipt", "possession", "noc", "affidavit", "power-of-attorney", "tax-certificate"]
     : ["agreement", "receipt", "possession", "noc", "affidavit"];
 }
 
@@ -51,6 +53,10 @@ function docMeta(kind: DocKind, isSale: boolean): { type: DocumentType; name: st
       return { type: "OTHER", name: "No Objection Certificate" };
     case "affidavit":
       return { type: "OTHER", name: isSale ? "Seller's Affidavit" : "Tenant Undertaking" };
+    case "power-of-attorney":
+      return { type: "OTHER", name: "Power of Attorney" };
+    case "tax-certificate":
+      return { type: "OTHER", name: "Tax / FBR Certificate" };
   }
 }
 

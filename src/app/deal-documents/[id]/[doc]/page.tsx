@@ -85,6 +85,8 @@ export default async function DealDocumentPage({
     possession: "Possession / Handover Note",
     noc: "No Objection Certificate (NOC)",
     affidavit: isSale ? "Affidavit of Ownership & Indemnity" : "Tenant Undertaking",
+    "power-of-attorney": "Special Power of Attorney",
+    "tax-certificate": "Tax / FBR Certificate",
   };
   const title = TITLES[kind];
 
@@ -132,6 +134,12 @@ export default async function DealDocumentPage({
           )}
           {kind === "affidavit" && (
             <AffidavitBody isSale={isSale} partyA={partyA} partyB={partyB} propTitle={deal.property.title} propLine={propLine} />
+          )}
+          {kind === "power-of-attorney" && (
+            <PowerOfAttorneyBody partyA={partyA} partyB={partyB} property={deal.property} propLine={propLine} />
+          )}
+          {kind === "tax-certificate" && (
+            <TaxCertificateBody partyA={partyA} partyB={partyB} t={t} property={deal.property} propLine={propLine} />
           )}
 
           <footer className="mt-8 border-t border-line pt-4 text-[11px] text-muted">
@@ -547,6 +555,118 @@ function AffidavitBody({
           <div className="mt-10 border-t border-ink/60" />
           <p className="mt-1 font-medium">{deponent.name}</p>
           <p className="text-[11px] text-muted">Deponent — CNIC {deponent.cnic}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PowerOfAttorneyBody({
+  partyA, partyB, property, propLine,
+}: {
+  partyA: Party; partyB: Party; property: { title: string; reference: string }; propLine: string;
+}) {
+  return (
+    <div className="py-6">
+      <p className="mb-4">
+        KNOW ALL MEN BY THESE PRESENTS that I, <span className="font-medium">{partyA.name}</span> (CNIC {partyA.cnic})
+        (the “Principal”), do hereby nominate, constitute and appoint{" "}
+        <span className="font-medium">{partyB.name}</span> (CNIC {partyB.cnic}) (the “Attorney”) to be my true and lawful
+        attorney, to act for me and in my name in respect of the property described below.
+      </p>
+      <div className="mb-5 grid gap-3 sm:grid-cols-2">
+        <PartyCard p={{ ...partyA, role: "Principal (Executant)" }} />
+        <PartyCard p={{ ...partyB, role: "Attorney" }} />
+      </div>
+      <PropertyBlock title={property.title} line={[propLine, `Ref: ${property.reference}`].filter(Boolean).join(" · ")} />
+
+      <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted">Powers granted</p>
+      <ol className="mb-2 pl-1">
+        <Clause n={1}>To represent me before the Sub-Registrar, housing society, development authority and all concerned offices in respect of the said property.</Clause>
+        <Clause n={2}>To sign, execute, present and admit for registration all documents, deeds, transfer and mutation papers relating to the said property.</Clause>
+        <Clause n={3}>To pay and receive fees, taxes, dues and to obtain receipts, NOCs and possession on my behalf.</Clause>
+        <Clause n={4}>To appear before authorities, give statements, and do all acts necessary to complete the transfer / management of the said property.</Clause>
+        <Clause n={5}>That all lawful acts done by the Attorney under this authority shall be binding on me as if done by me personally.</Clause>
+      </ol>
+      <p className="mb-2 text-[11px] text-muted">
+        This Power of Attorney is to be executed on stamp paper of the requisite value and attested before a Notary
+        Public / Oath Commissioner.
+      </p>
+      <div className="mt-12 grid grid-cols-2 gap-10">
+        <div>
+          <div className="mt-10 border-t border-ink/60" />
+          <p className="mt-1 text-[11px] text-muted">Attested — Oath Commissioner / Notary Public</p>
+        </div>
+        <div>
+          <div className="mt-10 border-t border-ink/60" />
+          <p className="mt-1 font-medium">{partyA.name}</p>
+          <p className="text-[11px] text-muted">Principal — CNIC {partyA.cnic}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TaxCertificateBody({
+  partyA, partyB, t, property, propLine,
+}: {
+  partyA: Party; partyB: Party; t: Terms; property: { title: string; reference: string }; propLine: string;
+}) {
+  const heads = [
+    { head: "Advance Tax — Seller", ref: "u/s 236C" },
+    { head: "Advance Tax — Buyer", ref: "u/s 236K" },
+    { head: "Capital Value Tax (CVT)", ref: "provincial" },
+    { head: "Stamp Duty", ref: "provincial" },
+    { head: "Registration / Transfer Fee", ref: "society / registrar" },
+  ];
+  return (
+    <div className="py-6">
+      <p className="mb-5">
+        This certificate records the tax position for the transfer of the property described below between{" "}
+        <span className="font-medium">{partyA.name}</span> (Seller) and <span className="font-medium">{partyB.name}</span> (Buyer).
+      </p>
+      <div className="mb-5 rounded-md border border-line-soft p-3">
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Transaction</p>
+        <p className="mt-1 font-medium">{property.title}</p>
+        {propLine && <p className="text-muted">{propLine}</p>}
+        <p className="text-muted">Ref: {property.reference}</p>
+        <p className="mt-1">Declared value: <span className="font-medium">{t.salePrice != null ? money(t.salePrice as never) : "—"}</span></p>
+      </div>
+
+      <table className="mb-3 w-full border-collapse text-sm">
+        <thead>
+          <tr className="border-y border-line text-left text-xs uppercase tracking-wide text-muted">
+            <th className="py-2 font-medium">Tax head</th>
+            <th className="py-2 font-medium">Reference</th>
+            <th className="py-2 font-medium">Challan / CPR no.</th>
+            <th className="py-2 text-right font-medium">Amount</th>
+          </tr>
+        </thead>
+        <tbody>
+          {heads.map((h) => (
+            <tr key={h.head} className="border-b border-line-soft">
+              <td className="py-2.5 font-medium text-ink">{h.head}</td>
+              <td className="py-2.5 text-muted">{h.ref}</td>
+              <td className="py-2.5 text-muted">____________________</td>
+              <td className="py-2.5 text-right text-muted">____________</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p className="mb-2 text-[11px] text-muted">
+        Amounts are to be entered from the paid FBR / provincial challans (CPRs), copies of which are attached. This
+        certificate confirms the taxes applicable to the above transfer have been accounted for.
+      </p>
+      <div className="mt-12 grid grid-cols-2 gap-10">
+        <div>
+          <div className="mt-10 border-t border-ink/60" />
+          <p className="mt-1 font-medium">{partyA.name}</p>
+          <p className="text-[11px] text-muted">Seller</p>
+        </div>
+        <div>
+          <div className="mt-10 border-t border-ink/60" />
+          <p className="mt-1 font-medium">{partyB.name}</p>
+          <p className="text-[11px] text-muted">Buyer</p>
         </div>
       </div>
     </div>

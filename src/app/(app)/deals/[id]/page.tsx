@@ -110,7 +110,7 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
 
   // Split the deal's documents into the generated agreement pack (printable
   // routes) and manually-uploaded files, so the pack gets its own tidy block.
-  const PACK_ORDER = ["agreement", "sale-deed", "payment-plan", "receipt", "possession", "noc", "affidavit"];
+  const PACK_ORDER = ["agreement", "sale-deed", "payment-plan", "receipt", "possession", "noc", "affidavit", "power-of-attorney", "tax-certificate"];
   const generatedDocs = deal.documents
     .filter((d) => d.url.startsWith("/deal-documents/"))
     .sort((a, b) => PACK_ORDER.indexOf(a.url.split("/").pop() ?? "") - PACK_ORDER.indexOf(b.url.split("/").pop() ?? ""));
