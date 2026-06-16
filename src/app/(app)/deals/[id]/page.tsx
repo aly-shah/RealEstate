@@ -529,7 +529,7 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
                   <ul className="space-y-1">
                     {uploadedDocs.map((d) => (
                       <li key={d.id} className="flex items-center justify-between gap-2 text-sm">
-                        <a href={d.url} target="_blank" rel="noopener noreferrer" className="truncate text-ink hover:text-accent">{d.name}</a>
+                        <a href={`/documents/${d.id}`} className="truncate text-ink hover:text-accent">{d.name}</a>
                         <StatusBadge status={d.verification} />
                       </li>
                     ))}

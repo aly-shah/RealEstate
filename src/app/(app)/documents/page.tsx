@@ -70,7 +70,7 @@ export default async function DocumentsPage({
               return (
                 <tr key={d.id} className="hover:bg-line-soft">
                   <Td>
-                    <a href={d.url} target="_blank" rel="noopener noreferrer" className="font-medium text-ink hover:text-accent">{d.name}</a>
+                    <a href={`/documents/${d.id}`} className="font-medium text-ink hover:text-accent">{d.name}</a>
                     <div className="text-xs text-muted">by {d.uploadedBy?.name ?? "—"}</div>
                   </Td>
                   <Td className="text-xs">{humanize(d.type)}</Td>
