@@ -6,7 +6,7 @@ import { can } from "@/lib/rbac";
 import { money, fmtDate, fmtDateTime, toNumber } from "@/lib/format";
 import { Brand } from "@/components/ui/Brand";
 import { PrintButton } from "@/components/PrintButton";
-import { DEAL_DOC_KINDS, type DealDocKind } from "@/lib/deal-documents";
+import { ALL_DEAL_DOC_KINDS, type DealDocKind } from "@/lib/deal-documents";
 
 /**
  * Standalone, print-friendly deal document (browser → Save as PDF). One route
@@ -21,7 +21,7 @@ export default async function DealDocumentPage({
   params: Promise<{ id: string; doc: string }>;
 }) {
   const { id, doc } = await params;
-  if (!DEAL_DOC_KINDS.includes(doc as DealDocKind)) notFound();
+  if (!ALL_DEAL_DOC_KINDS.includes(doc as DealDocKind)) notFound();
   const kind = doc as DealDocKind;
 
   const user = await requireUser();
@@ -77,12 +77,16 @@ export default async function DealDocumentPage({
   };
 
   const propLine = [deal.property.address, deal.property.area, deal.property.city].filter(Boolean).join(", ");
-  const title =
-    kind === "agreement"
-      ? isSale ? "Agreement to Sell" : "Rental / Lease Agreement"
-      : kind === "receipt"
-        ? isSale ? "Token / Booking Receipt" : "Security Deposit Receipt"
-        : "Possession / Handover Note";
+  const TITLES: Record<DealDocKind, string> = {
+    agreement: isSale ? "Agreement to Sell" : "Rental / Lease Agreement",
+    "sale-deed": "Sale Deed (Transfer of Ownership)",
+    "payment-plan": "Payment Schedule",
+    receipt: isSale ? "Token / Booking Receipt" : "Security Deposit Receipt",
+    possession: "Possession / Handover Note",
+    noc: "No Objection Certificate (NOC)",
+    affidavit: isSale ? "Affidavit of Ownership & Indemnity" : "Tenant Undertaking",
+  };
+  const title = TITLES[kind];
 
   const backHref = `/deals/${deal.id}`;
 
@@ -111,11 +115,23 @@ export default async function DealDocumentPage({
           {kind === "agreement" && (
             <AgreementBody isSale={isSale} partyA={partyA} partyB={partyB} t={t} property={deal.property} propLine={propLine} />
           )}
+          {kind === "sale-deed" && (
+            <SaleDeedBody partyA={partyA} partyB={partyB} t={t} property={deal.property} propLine={propLine} />
+          )}
+          {kind === "payment-plan" && (
+            <PaymentPlanBody partyB={partyB} t={t} reference={deal.reference} propTitle={deal.property.title} />
+          )}
           {kind === "receipt" && (
             <ReceiptBody isSale={isSale} partyA={partyA} partyB={partyB} t={t} reference={deal.reference} propTitle={deal.property.title} />
           )}
           {kind === "possession" && (
             <PossessionBody isSale={isSale} partyA={partyA} partyB={partyB} t={t} propTitle={deal.property.title} propLine={propLine} />
+          )}
+          {kind === "noc" && (
+            <NocBody isSale={isSale} partyA={partyA} partyB={partyB} propTitle={deal.property.title} propLine={propLine} />
+          )}
+          {kind === "affidavit" && (
+            <AffidavitBody isSale={isSale} partyA={partyA} partyB={partyB} propTitle={deal.property.title} propLine={propLine} />
           )}
 
           <footer className="mt-8 border-t border-line pt-4 text-[11px] text-muted">
@@ -344,6 +360,195 @@ function PossessionBody({
       </ol>
       {t.clauses && <p className="mb-2 whitespace-pre-wrap">{t.clauses}</p>}
       <SignatureBlock partyA={partyA} partyB={partyB} />
+    </div>
+  );
+}
+
+function PropertyBlock({ title, line }: { title: string; line: string }) {
+  return (
+    <div className="mb-5 rounded-md border border-line-soft p-3">
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Property</p>
+      <p className="mt-1 font-medium">{title}</p>
+      {line && <p className="text-muted">{line}</p>}
+    </div>
+  );
+}
+
+function SaleDeedBody({
+  partyA, partyB, t, property, propLine,
+}: {
+  partyA: Party; partyB: Party; t: Terms; property: { title: string; reference: string }; propLine: string;
+}) {
+  const price = t.salePrice != null ? money(t.salePrice as never) : "the agreed consideration";
+  return (
+    <div className="py-6">
+      <p className="mb-5">
+        This Sale Deed is executed on the date above between the Seller (First Party) and the Buyer (Second Party) named
+        below, transferring absolute ownership of the property described herein.
+      </p>
+      <div className="mb-6 grid gap-3 sm:grid-cols-2">
+        <PartyCard p={partyA} />
+        <PartyCard p={partyB} />
+      </div>
+      <PropertyBlock title={property.title} line={[propLine, `Ref: ${property.reference}`].filter(Boolean).join(" · ")} />
+
+      <p className="mb-3">
+        WHEREAS the Seller is the lawful and absolute owner in peaceful possession of the said property, free from all
+        encumbrances, mortgages, charges, liens, litigation and disputes; AND WHEREAS the Seller has agreed to sell and
+        the Buyer has agreed to purchase the said property for a total consideration of {price}.
+      </p>
+      <p className="mb-4">
+        NOW THIS DEED WITNESSES that in consideration of the said sum, the receipt of which the Seller acknowledges, the
+        Seller hereby sells, transfers and conveys unto the Buyer all rights, title and interest in the said property, to
+        have and to hold the same absolutely and forever.
+      </p>
+      <ol className="mb-2 pl-1">
+        <Clause n={1}>The Seller has delivered / shall deliver vacant physical possession of the property to the Buyer.</Clause>
+        <Clause n={2}>The Seller warrants clear and marketable title and shall indemnify the Buyer against any third-party claim.</Clause>
+        <Clause n={3}>All taxes, utility dues and society charges up to the date of transfer are cleared by the Seller.</Clause>
+        <Clause n={4}>Transfer / registration costs shall be borne as agreed between the parties.</Clause>
+        <Clause n={5}>This transfer shall be duly recorded with the relevant authority / housing society / sub-registrar.</Clause>
+      </ol>
+      {t.clauses && <p className="mb-2 whitespace-pre-wrap">{t.clauses}</p>}
+      <SignatureBlock partyA={partyA} partyB={partyB} />
+    </div>
+  );
+}
+
+function PaymentPlanBody({
+  partyB, t, reference, propTitle,
+}: {
+  partyB: Party; t: Terms; reference: string; propTitle: string;
+}) {
+  const total = toNumber(t.salePrice as never);
+  const token = toNumber((t.tokenAmount ?? 0) as never);
+  const down = toNumber((t.downPayment ?? 0) as never);
+  const balance = Math.max(0, total - token - down);
+  const rows = [
+    { stage: "Token / Bayana", when: "On booking", amount: token, status: "Paid" },
+    { stage: "Down payment", when: "On signing the agreement", amount: down, status: "Due" },
+    { stage: "Balance on transfer", when: "At transfer & possession", amount: balance, status: "Due" },
+  ];
+  return (
+    <div className="py-6">
+      <p className="mb-5">
+        Payment schedule for <span className="font-medium">{partyB.name}</span> against the purchase of{" "}
+        <span className="font-medium">{propTitle}</span> (Ref: {reference}).
+      </p>
+      <table className="mb-4 w-full border-collapse text-sm">
+        <thead>
+          <tr className="border-y border-line text-left text-xs uppercase tracking-wide text-muted">
+            <th className="py-2 font-medium">Stage</th>
+            <th className="py-2 font-medium">Milestone</th>
+            <th className="py-2 text-right font-medium">Amount</th>
+            <th className="py-2 text-right font-medium">Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.stage} className="border-b border-line-soft">
+              <td className="py-2 font-medium text-ink">{r.stage}</td>
+              <td className="py-2 text-muted">{r.when}</td>
+              <td className="py-2 text-right">{money(r.amount as never)}</td>
+              <td className="py-2 text-right text-muted">{r.status}</td>
+            </tr>
+          ))}
+        </tbody>
+        <tfoot>
+          <tr>
+            <td className="py-2 text-right text-sm font-medium text-muted" colSpan={2}>Total sale price</td>
+            <td className="py-2 text-right text-base font-semibold text-ink">{money((total || 0) as never)}</td>
+            <td />
+          </tr>
+        </tfoot>
+      </table>
+      <p className="text-[11px] text-muted">
+        Amounts are derived from the contract terms. Dates and instalments may be adjusted by mutual agreement and
+        recorded in the special clauses.
+      </p>
+      {t.clauses && <p className="mt-3 whitespace-pre-wrap">{t.clauses}</p>}
+    </div>
+  );
+}
+
+function NocBody({
+  isSale, partyA, partyB, propTitle, propLine,
+}: {
+  isSale: boolean; partyA: Party; partyB: Party; propTitle: string; propLine: string;
+}) {
+  return (
+    <div className="py-6">
+      <p className="mb-4 font-semibold">TO WHOM IT MAY CONCERN</p>
+      <p className="mb-4">
+        I, <span className="font-medium">{partyA.name}</span> (CNIC {partyA.cnic}), the lawful owner of the property
+        described below, hereby state that I have <span className="font-medium">NO OBJECTION</span> to the{" "}
+        {isSale ? "sale and transfer" : "tenancy"} of the said property{" "}
+        {isSale ? "to" : "in favour of"} <span className="font-medium">{partyB.name}</span> (CNIC {partyB.cnic}).
+      </p>
+      <PropertyBlock title={propTitle} line={propLine} />
+      <p className="mb-2">
+        This certificate is issued for the purpose of{" "}
+        {isSale ? "transfer / registration of the property" : "lease registration and tenant verification"} on the request
+        of the concerned party. I confirm that, to the best of my knowledge, the property is free from any dispute or
+        encumbrance.
+      </p>
+      <div className="mt-12 grid grid-cols-2 gap-10">
+        <div>
+          <div className="mt-10 border-t border-ink/60" />
+          <p className="mt-1 font-medium">{partyA.name}</p>
+          <p className="text-[11px] text-muted">Owner — CNIC {partyA.cnic}</p>
+        </div>
+        <div />
+      </div>
+    </div>
+  );
+}
+
+function AffidavitBody({
+  isSale, partyA, partyB, propTitle, propLine,
+}: {
+  isSale: boolean; partyA: Party; partyB: Party; propTitle: string; propLine: string;
+}) {
+  const deponent = isSale ? partyA : partyB;
+  return (
+    <div className="py-6">
+      <p className="mb-1 text-center font-semibold uppercase tracking-wide">Affidavit</p>
+      <p className="mb-4 text-center text-[11px] text-muted">(On stamp paper of the requisite value)</p>
+      <p className="mb-4">
+        I, <span className="font-medium">{deponent.name}</span>, holder of CNIC {deponent.cnic}, do hereby solemnly affirm
+        and declare as under:
+      </p>
+      <ol className="mb-3 pl-1">
+        {isSale ? (
+          <>
+            <Clause n={1}>That I am the lawful and absolute owner of the property described below.</Clause>
+            <Clause n={2}>That the said property is free from all encumbrances, mortgages, charges, litigation and disputes.</Clause>
+            <Clause n={3}>That I have full authority to sell and transfer it, and no other person has any right, title or interest therein.</Clause>
+            <Clause n={4}>That I have received the agreed consideration and shall indemnify the purchaser against any loss arising from a defect in title.</Clause>
+            <Clause n={5}>That the contents of this affidavit are true and correct to the best of my knowledge and belief.</Clause>
+          </>
+        ) : (
+          <>
+            <Clause n={1}>That I have taken the property described below on rent from the Landlord on the agreed terms.</Clause>
+            <Clause n={2}>That I shall use the premises for lawful purposes only and pay the rent regularly.</Clause>
+            <Clause n={3}>That I shall not sublet or structurally alter the premises without the Landlord&rsquo;s written consent.</Clause>
+            <Clause n={4}>That I shall bear the utility charges and vacate the premises on expiry / termination as per the agreement.</Clause>
+            <Clause n={5}>That the contents of this undertaking are true and correct to the best of my knowledge.</Clause>
+          </>
+        )}
+      </ol>
+      <PropertyBlock title={propTitle} line={propLine} />
+      <div className="mt-10 grid grid-cols-2 gap-10">
+        <div>
+          <div className="mt-10 border-t border-ink/60" />
+          <p className="mt-1 text-[11px] text-muted">Attested — Oath Commissioner / Notary Public</p>
+        </div>
+        <div>
+          <div className="mt-10 border-t border-ink/60" />
+          <p className="mt-1 font-medium">{deponent.name}</p>
+          <p className="text-[11px] text-muted">Deponent — CNIC {deponent.cnic}</p>
+        </div>
+      </div>
     </div>
   );
 }

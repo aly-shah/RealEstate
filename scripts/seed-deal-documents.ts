@@ -24,19 +24,33 @@
 
 import { PrismaClient, type DocumentType } from "@prisma/client";
 
-type DocKind = "agreement" | "receipt" | "possession";
-const KINDS: DocKind[] = ["agreement", "receipt", "possession"];
+type DocKind = "agreement" | "sale-deed" | "payment-plan" | "receipt" | "possession" | "noc" | "affidavit";
+
+// Mirrors lib/deal-documents.ts dealDocKinds() — the set differs by deal type.
+function kindsFor(isSale: boolean): DocKind[] {
+  return isSale
+    ? ["agreement", "sale-deed", "payment-plan", "receipt", "possession", "noc", "affidavit"]
+    : ["agreement", "receipt", "possession", "noc", "affidavit"];
+}
 
 function docMeta(kind: DocKind, isSale: boolean): { type: DocumentType; name: string } {
   switch (kind) {
     case "agreement":
       return isSale
-        ? { type: "SALE_AGREEMENT", name: "Sale Agreement" }
+        ? { type: "SALE_AGREEMENT", name: "Agreement to Sell" }
         : { type: "RENTAL_AGREEMENT", name: "Rental Agreement" };
+    case "sale-deed":
+      return { type: "OWNERSHIP_DOCUMENT", name: "Sale Deed (Transfer)" };
+    case "payment-plan":
+      return { type: "OTHER", name: "Payment Schedule" };
     case "receipt":
       return { type: "PAYMENT_RECEIPT", name: isSale ? "Token / Booking Receipt" : "Security Deposit Receipt" };
     case "possession":
       return { type: "OTHER", name: "Possession / Handover Note" };
+    case "noc":
+      return { type: "OTHER", name: "No Objection Certificate" };
+    case "affidavit":
+      return { type: "OTHER", name: isSale ? "Seller's Affidavit" : "Tenant Undertaking" };
   }
 }
 
@@ -114,14 +128,16 @@ async function main() {
       },
     });
 
-    // syncDealDocuments — reconcile the three Document rows by url prefix.
+    // syncDealDocuments — reconcile the pack's Document rows by url prefix.
+    const kinds = kindsFor(isSale);
     const prefix = `/deal-documents/${deal.id}/`;
     const existing = await prisma.document.findMany({
       where: { dealId: deal.id, url: { startsWith: prefix } },
       select: { id: true, url: true },
     });
     const byUrl = new Map(existing.map((d) => [d.url, d.id]));
-    for (const kind of KINDS) {
+    const wanted = new Set(kinds.map((k) => `${prefix}${k}`));
+    for (const kind of kinds) {
       const meta = docMeta(kind, isSale);
       const url = `${prefix}${kind}`;
       const id = byUrl.get(url);
@@ -131,11 +147,13 @@ async function main() {
           data: { companyId: deal.companyId, dealId: deal.id, name: meta.name, type: meta.type, url, verification: "PENDING" },
         });
     }
+    const stale = existing.filter((d) => !wanted.has(d.url)).map((d) => d.id);
+    if (stale.length) await prisma.document.deleteMany({ where: { id: { in: stale } } });
 
     console.log("");
     console.log(`Generated document pack on "${deal.reference}" (${deal.property?.title ?? "—"}) — ${deal.type}`);
     console.log("Open these (prefix with your origin, e.g. http://localhost:3000):");
-    for (const kind of KINDS) console.log(`  ${kind.padEnd(11)} ${prefix}${kind}`);
+    for (const kind of kinds) console.log(`  ${kind.padEnd(13)} ${prefix}${kind}`);
     console.log(`Or from the deal page: /deals/${deal.id}  → Documents list (clickable).`);
   } finally {
     await prisma.$disconnect();
