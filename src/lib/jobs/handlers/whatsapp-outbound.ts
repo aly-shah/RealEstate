@@ -1,7 +1,6 @@
 import type { JobHandler } from "@/lib/jobs/types";
 import { prisma } from "@/lib/prisma";
-import { sendWhatsAppText, sendWhatsAppTemplate } from "@/lib/wa-business";
-import { decryptSecret } from "@/lib/crypto";
+import { sendCompanyText, sendCompanyTemplate } from "@/lib/wa-send";
 
 /**
  * Phase-9.5 outbound WhatsApp handler.
@@ -50,44 +49,13 @@ export const whatsappOutboundHandler: JobHandler = async ({ payload, companyId }
     throw new Error("Malformed template payload — templateName and language are required.");
   }
 
-  const company = await prisma.company.findUnique({
-    where: { id: companyId },
-    select: { whatsappPhoneId: true, whatsappAccessToken: true },
-  });
-  if (!company?.whatsappPhoneId || !company?.whatsappAccessToken) {
-    // Refuse to retry — credentials gone means the tenant un-configured
-    // outbound mid-flight. Throwing a clear message is more useful than
-    // burning the retry budget on something the runner can't fix.
-    throw new Error("Tenant has no WhatsApp Business API credentials configured.");
-  }
-
-  // Decrypt the stored token. decryptSecret returns null on tamper /
-  // wrong key (e.g. AUTH_SECRET rotated without re-saving tokens) so
-  // we surface that as a clear failure rather than passing garbage to
-  // Meta and seeing a 401 with no context.
-  const token = decryptSecret(company.whatsappAccessToken);
-  if (!token) {
-    throw new Error(
-      "WhatsApp access token failed to decrypt — re-save it in Settings → Integrations.",
-    );
-  }
-
+  // Send via the company's channel — a live QR-linked session when connected,
+  // else the Cloud API (token loaded + decrypted inside wa-send). A failure
+  // result (incl. "not connected") is logged below and thrown so /admin/jobs
+  // surfaces it.
   const result = kind === "template"
-    ? await sendWhatsAppTemplate({
-        phoneNumberId: company.whatsappPhoneId,
-        accessToken: token,
-        toPhone: p.toPhone,
-        templateName: p.templateName!,
-        language: p.language!,
-        bodyParams: p.bodyParams ?? [],
-        headerParams: p.headerParams ?? [],
-      })
-    : await sendWhatsAppText({
-        phoneNumberId: company.whatsappPhoneId,
-        accessToken: token,
-        toPhone: p.toPhone,
-        body: p.body!,
-      });
+    ? await sendCompanyTemplate(companyId, p.toPhone, p.templateName!, p.language!, p.bodyParams ?? [], p.headerParams ?? [])
+    : await sendCompanyText(companyId, p.toPhone, p.body!);
 
   // Record the outcome on the activity log regardless of success — the
   // operator wants to see failed sends in the lead timeline too, with

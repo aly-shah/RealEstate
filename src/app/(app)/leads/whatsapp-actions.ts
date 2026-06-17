@@ -4,6 +4,7 @@ import { requireCompanyUser } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { enqueueJob, JOB_TYPES } from "@/lib/jobs";
 import { logActivity } from "@/lib/activity";
+import { isConnected } from "@/lib/wa-qr/manager";
 
 export interface SendResult {
   ok: boolean;
@@ -55,10 +56,11 @@ export async function sendWhatsAppMessage(
     where: { id: user.companyId },
     select: { whatsappPhoneId: true, whatsappAccessToken: true },
   });
-  if (!company?.whatsappPhoneId || !company?.whatsappAccessToken) {
+  const hasCloud = !!company?.whatsappPhoneId && !!company?.whatsappAccessToken;
+  if (!hasCloud && !isConnected(user.companyId)) {
     return {
       ok: false,
-      reason: "WhatsApp Business API isn't configured for this workspace. Set it up in Settings.",
+      reason: "WhatsApp isn't connected for this workspace. Link it (QR or Business API) in Settings.",
     };
   }
 
@@ -144,10 +146,11 @@ export async function sendWhatsAppTemplate(
     where: { id: user.companyId },
     select: { whatsappPhoneId: true, whatsappAccessToken: true },
   });
-  if (!company?.whatsappPhoneId || !company?.whatsappAccessToken) {
+  const hasCloud = !!company?.whatsappPhoneId && !!company?.whatsappAccessToken;
+  if (!hasCloud && !isConnected(user.companyId)) {
     return {
       ok: false,
-      reason: "WhatsApp Business API isn't configured for this workspace. Set it up in Settings.",
+      reason: "WhatsApp isn't connected for this workspace. Link it (QR or Business API) in Settings.",
     };
   }
 

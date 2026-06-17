@@ -1,6 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { decryptSecret } from "@/lib/crypto";
-import { sendWhatsAppTemplate } from "@/lib/wa-business";
+import { sendCompanyTemplate } from "@/lib/wa-send";
 
 /**
  * Drip-sequence engine.
@@ -99,20 +98,6 @@ export async function runDripEnrollments(): Promise<DripRunResult> {
   });
   if (due.length === 0) return { processed: 0, executed: 0, finished: 0 };
 
-  // Cache decrypted WhatsApp creds per company across the batch.
-  const credsCache = new Map<string, { phoneNumberId: string; accessToken: string } | null>();
-  const companyCreds = async (companyId: string) => {
-    if (credsCache.has(companyId)) return credsCache.get(companyId)!;
-    const co = await prisma.company.findUnique({
-      where: { id: companyId },
-      select: { whatsappPhoneId: true, whatsappAccessToken: true },
-    });
-    const token = decryptSecret(co?.whatsappAccessToken);
-    const creds = co?.whatsappPhoneId && token ? { phoneNumberId: co.whatsappPhoneId, accessToken: token } : null;
-    credsCache.set(companyId, creds);
-    return creds;
-  };
-
   let executed = 0;
   let finished = 0;
 
@@ -153,16 +138,15 @@ export async function runDripEnrollments(): Promise<DripRunResult> {
       } else if (step.kind === "WHATSAPP_TEMPLATE" && step.templateName && step.templateLang) {
         const phone = e.lead.client?.phone;
         const optedOut = e.lead.client?.marketingOptOut ?? false;
-        const creds = await companyCreds(e.companyId);
-        if (phone && !optedOut && creds) {
-          const res = await sendWhatsAppTemplate({
-            phoneNumberId: creds.phoneNumberId,
-            accessToken: creds.accessToken,
-            toPhone: phone,
-            templateName: step.templateName,
-            language: step.templateLang,
-            bodyParams: [e.lead.client?.name ?? "there"],
-          });
+        if (phone && !optedOut) {
+          // Sends via the QR-linked session when connected, else the Cloud API.
+          const res = await sendCompanyTemplate(
+            e.companyId,
+            phone,
+            step.templateName,
+            step.templateLang,
+            [e.lead.client?.name ?? "there"],
+          );
           if (res.ok) executed += 1;
         }
       }

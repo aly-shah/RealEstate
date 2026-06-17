@@ -1,7 +1,6 @@
 import type { WaAutomationEvent } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { decryptSecret } from "@/lib/crypto";
-import { sendWhatsAppTemplate } from "@/lib/wa-business";
+import { sendCompanyTemplate, whatsAppAvailable } from "@/lib/wa-send";
 
 /**
  * Send an automated message through the company's mapped Meta-approved template
@@ -25,34 +24,27 @@ export async function sendAutomationTemplate(input: {
   /** Positional body params for the template's {{1}}, {{2}}, … placeholders. */
   bodyParams: string[];
 }): Promise<AutomationSendResult> {
-  const [mapping, company] = await Promise.all([
-    prisma.whatsAppAutomation.findUnique({
-      where: { companyId_event: { companyId: input.companyId, event: input.event } },
-      select: { templateName: true, language: true },
-    }),
-    prisma.company.findUnique({
-      where: { id: input.companyId },
-      select: { whatsappPhoneId: true, whatsappAccessToken: true },
-    }),
-  ]);
+  const mapping = await prisma.whatsAppAutomation.findUnique({
+    where: { companyId_event: { companyId: input.companyId, event: input.event } },
+    select: { templateName: true, language: true },
+  });
 
   if (!mapping) {
     return { ok: false, reason: "No template mapped for this event.", configured: false };
   }
-  const phoneNumberId = company?.whatsappPhoneId ?? null;
-  const accessToken = decryptSecret(company?.whatsappAccessToken);
-  if (!phoneNumberId || !accessToken) {
+  if (!(await whatsAppAvailable(input.companyId))) {
     return { ok: false, reason: "WhatsApp isn't connected for this company.", configured: false };
   }
 
-  const res = await sendWhatsAppTemplate({
-    phoneNumberId,
-    accessToken,
-    toPhone: input.toPhone,
-    templateName: mapping.templateName,
-    language: mapping.language,
-    bodyParams: input.bodyParams,
-  });
+  // Prefers the QR-linked session (renders the template body to text); else the
+  // Cloud API template send.
+  const res = await sendCompanyTemplate(
+    input.companyId,
+    input.toPhone,
+    mapping.templateName,
+    mapping.language,
+    input.bodyParams,
+  );
   // configured: true — a mapping + creds existed, so a failure here is a real
   // send error (bad params, template paused, rate limit) worth surfacing.
   return res.ok

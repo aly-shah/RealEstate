@@ -10,6 +10,7 @@ import makeWASocket, {
 } from "@whiskeysockets/baileys";
 import { UPLOAD_ROOT } from "@/lib/uploads";
 import { prisma } from "@/lib/prisma";
+import { enqueueJob, JOB_TYPES } from "@/lib/jobs";
 
 /**
  * Unofficial QR-linked WhatsApp (Baileys). Holds one live socket per company in
@@ -104,8 +105,25 @@ export async function startSession(companyId: string): Promise<void> {
       }
     });
 
-    // Inbound capture is a follow-up — listener registered so the socket drains.
-    sock.ev.on("messages.upsert", () => {});
+    // Inbound: normalise each new 1:1 text message to the same shape the Cloud
+    // API webhook produces and enqueue it on the WHATSAPP_INBOUND pipeline
+    // (classify → find/create client → create + route lead → opt-out).
+    sock.ev.on("messages.upsert", (ev) => {
+      if (ev.type !== "notify") return;
+      for (const msg of ev.messages) {
+        const jid = msg.key.remoteJid ?? "";
+        if (msg.key.fromMe || !jid.endsWith("@s.whatsapp.net")) continue; // skip own / groups / status
+        const text = msg.message?.conversation ?? msg.message?.extendedTextMessage?.text ?? null;
+        if (!text) continue;
+        const from = jid.replace(/@s\.whatsapp\.net$/, "");
+        void enqueueJob({
+          type: JOB_TYPES.WHATSAPP_INBOUND,
+          companyId,
+          payload: { from, text, name: msg.pushName ?? null, source: "WHATSAPP_QR" },
+          idempotencyKey: msg.key.id ?? null,
+        }).catch(() => {});
+      }
+    });
   } catch {
     session.starting = false;
     session.status = "DISCONNECTED";
@@ -123,6 +141,11 @@ export async function getStatus(companyId: string): Promise<{ status: WaStatus; 
   }
   const cur = sessions.get(companyId);
   return { status: cur?.status ?? "DISCONNECTED", qr: cur?.qr ?? null };
+}
+
+/** Synchronous: is this company's QR socket live right now? (reads the in-memory map). */
+export function isConnected(companyId: string): boolean {
+  return sessions.get(companyId)?.status === "CONNECTED" && !!sessions.get(companyId)?.sock;
 }
 
 export async function sendText(companyId: string, toPhone: string, text: string): Promise<boolean> {

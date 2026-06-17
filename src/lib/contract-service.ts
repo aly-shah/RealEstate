@@ -1,8 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { sendWhatsAppText } from "@/lib/wa-business";
+import { sendCompanyText, whatsAppAvailable } from "@/lib/wa-send";
 import { sendAutomationTemplate } from "@/lib/wa-automation";
-import { decryptSecret } from "@/lib/crypto";
 
 /**
  * Contract pipeline: create the e-sign Contract for a deal — sale or rental
@@ -103,16 +102,10 @@ export async function initiateContractPipelines(dealId: string): Promise<Contrac
   const renterLink = `${APP_URL}/verify-identity/${contract.renterToken}`;
   const warnings: string[] = [];
 
-  // Resolve the tenant's Meta credentials once (token is stored encrypted).
-  const company = await prisma.company.findUnique({
-    where: { id: deal.companyId },
-    select: { whatsappPhoneId: true, whatsappAccessToken: true },
-  });
-  const phoneNumberId = company?.whatsappPhoneId ?? null;
-  const accessToken = decryptSecret(company?.whatsappAccessToken);
-  const waReady = !!phoneNumberId && !!accessToken;
+  // Either a live QR-linked session or Cloud API creds can deliver the links.
+  const waReady = await whatsAppAvailable(deal.companyId);
   if (!waReady) {
-    warnings.push("WhatsApp isn't configured for this company — share the links manually.");
+    warnings.push("WhatsApp isn't connected for this company — share the links manually.");
   }
 
   // Per-party send: try the company's approved CONTRACT_VERIFY template first
@@ -138,7 +131,7 @@ export async function initiateContractPipelines(dealId: string): Promise<Contrac
     // unconfigured one just means "no template yet" → try free-form.
     if (tpl.configured) warnings.push(`${party} template send failed (${tpl.reason}).`);
     if (waReady) {
-      const r = await sendWhatsAppText({ phoneNumberId: phoneNumberId!, accessToken: accessToken!, toPhone: phone, body: fallbackBody });
+      const r = await sendCompanyText(deal.companyId, phone, fallbackBody);
       if (r.ok) return true;
       warnings.push(`${party} WhatsApp not delivered (${r.error}).`);
     }
