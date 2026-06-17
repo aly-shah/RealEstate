@@ -1362,6 +1362,17 @@ model SweepState {
   updatedAt DateTime @default(now()) @updatedAt
 }
 
+/// QR-linked (unofficial / Baileys) WhatsApp session status per company. The
+/// actual auth credentials live on disk (per-company session dir); this row only
+/// tracks linking status for the UI.
+model WhatsAppSession {
+  companyId String    @id
+  status    String    @default("DISCONNECTED") // PENDING | CONNECTED | DISCONNECTED
+  phone     String? // linked number (jid) once connected
+  linkedAt  DateTime?
+  updatedAt DateTime  @default(now()) @updatedAt
+}
+
 model Job {
   id           String    @id @default(cuid())
   companyId    String?

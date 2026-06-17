@@ -17,6 +17,7 @@ import {
   WhatsappAutomationForm,
 } from "./SettingsForms";
 import { setUserStatus } from "./actions";
+import { WaQrLink } from "./WaQrLink";
 import { planUsageSnapshot } from "@/lib/plans";
 import { aiUsageSnapshot } from "@/lib/ai/budget";
 import { fmtDate } from "@/lib/format";
@@ -166,6 +167,12 @@ export default async function SettingsPage() {
               aiServerConfigured: !!ai && ai.serverConfigured,
             }}
           />
+        </Section>
+      )}
+
+      {user.role === "OWNER" && company && (
+        <Section title="WhatsApp — QR link (unofficial)">
+          <WaQrLink />
         </Section>
       )}
 
