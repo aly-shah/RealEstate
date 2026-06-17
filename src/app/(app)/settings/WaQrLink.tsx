@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { startWaQrLink, unlinkWaQr } from "./wa-qr-actions";
+import { startWaQrLink, unlinkWaQr, sendWaQrTest } from "./wa-qr-actions";
 
 type Status = "LOADING" | "PENDING" | "CONNECTED" | "DISCONNECTED";
 
@@ -9,7 +9,18 @@ export function WaQrLink() {
   const [status, setStatus] = useState<Status>("LOADING");
   const [qr, setQr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [testPhone, setTestPhone] = useState("");
+  const [testBusy, setTestBusy] = useState(false);
+  const [testMsg, setTestMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  async function sendTest() {
+    setTestBusy(true);
+    setTestMsg(null);
+    const r = await sendWaQrTest(testPhone);
+    setTestMsg(r.ok ? { ok: true, text: "Sent ✓ — check the recipient's WhatsApp." } : { ok: false, text: r.error ?? "Send failed." });
+    setTestBusy(false);
+  }
 
   async function poll() {
     try {
@@ -68,13 +79,34 @@ export function WaQrLink() {
       {status === "LOADING" && <p className="text-sm text-muted">Checking connection…</p>}
 
       {status === "CONNECTED" && (
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="inline-flex items-center gap-2 text-sm font-medium text-ok">
-            <span className="h-2 w-2 rounded-full bg-ok" /> WhatsApp connected
-          </p>
-          <button type="button" onClick={unlink} disabled={busy} className="btn-ghost text-xs text-danger">
-            {busy ? "…" : "Unlink"}
-          </button>
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="inline-flex items-center gap-2 text-sm font-medium text-ok">
+              <span className="h-2 w-2 rounded-full bg-ok" /> WhatsApp connected
+            </p>
+            <button type="button" onClick={unlink} disabled={busy} className="btn-ghost text-xs text-danger">
+              {busy ? "…" : "Unlink"}
+            </button>
+          </div>
+
+          <div className="rounded-xl border border-line bg-paper p-3">
+            <p className="mb-2 text-xs font-medium text-slate">Send a test message</p>
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                value={testPhone}
+                onChange={(e) => setTestPhone(e.target.value)}
+                placeholder="e.g. 923001234567"
+                inputMode="tel"
+                className="field h-9 w-auto flex-1 text-sm"
+                aria-label="Recipient phone number"
+              />
+              <button type="button" onClick={sendTest} disabled={testBusy || !testPhone.trim()} className="btn-accent">
+                {testBusy ? "Sending…" : "Send test"}
+              </button>
+            </div>
+            {testMsg && <p className={`mt-2 text-xs ${testMsg.ok ? "text-ok" : "text-danger"}`}>{testMsg.text}</p>}
+            <p className="mt-1 text-[11px] text-muted">Goes out from the linked number, immediately (not via the queue).</p>
+          </div>
         </div>
       )}
 
