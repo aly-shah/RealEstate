@@ -43,7 +43,37 @@ export interface WhatsAppClassification {
     | null;
   suggested_pref_area: string | null;
   suggested_budget_pkr: number | null;
+  // Copilot fields — richer taxonomy for the inbox insight (one AI call).
+  sentiment: "POSITIVE" | "NEUTRAL" | "NEGATIVE";
+  suggested_action: string;
+  display_intent:
+    | "NEW_BUYER"
+    | "NEW_RENTAL"
+    | "BUDGET"
+    | "LOCATION"
+    | "VISIT"
+    | "NEGOTIATION"
+    | "DOC_PAYMENT"
+    | "COMPLAINT"
+    | "FOLLOW_UP"
+    | "NOT_INTERESTED"
+    | "SPAM";
 }
+
+const VALID_SENTIMENTS = new Set(["POSITIVE", "NEUTRAL", "NEGATIVE"] as const);
+const VALID_DISPLAY_INTENTS = new Set([
+  "NEW_BUYER", "NEW_RENTAL", "BUDGET", "LOCATION", "VISIT",
+  "NEGOTIATION", "DOC_PAYMENT", "COMPLAINT", "FOLLOW_UP", "NOT_INTERESTED", "SPAM",
+] as const);
+// Fallback display-intent derived from the base intent when the model omits it.
+const INTENT_TO_DISPLAY: Record<WhatsAppClassification["intent"], WhatsAppClassification["display_intent"]> = {
+  NEW_ENQUIRY: "NEW_BUYER",
+  SCHEDULING: "VISIT",
+  OBJECTION: "NEGOTIATION",
+  FOLLOW_UP: "FOLLOW_UP",
+  QUESTION: "FOLLOW_UP",
+  OFF_TOPIC: "SPAM",
+};
 
 const VALID_INTENTS = new Set([
   "NEW_ENQUIRY",
@@ -70,16 +100,22 @@ Respond with a single JSON object. No prose, no Markdown, no code fences — JSO
 
 The object MUST have exactly these keys:
   intent: one of NEW_ENQUIRY, FOLLOW_UP, QUESTION, OBJECTION, SCHEDULING, OFF_TOPIC
+  display_intent: one of NEW_BUYER, NEW_RENTAL, BUDGET, LOCATION, VISIT, NEGOTIATION, DOC_PAYMENT, COMPLAINT, FOLLOW_UP, NOT_INTERESTED, SPAM
   urgency: one of LOW, MEDIUM, HIGH
+  sentiment: one of POSITIVE, NEUTRAL, NEGATIVE
   lead_summary: string, one sentence, <= 140 chars
+  suggested_action: string, <= 120 chars — the single best next step for the agent
   suggested_pref_type: one of RESIDENTIAL, COMMERCIAL, PLOT, APARTMENT, VILLA, SHOP, OFFICE, or null
   suggested_pref_area: string or null
   suggested_budget_pkr: integer or null
 
 Field rules:
 - intent: NEW_ENQUIRY for first-touch property interest; FOLLOW_UP if they reference a prior conversation; QUESTION for info requests; OBJECTION for price/quality pushback; SCHEDULING for visit/meeting requests; OFF_TOPIC for anything not related to property.
+- display_intent: the more specific category — NEW_BUYER / NEW_RENTAL for a fresh purchase / rental enquiry; BUDGET for budget/price-range questions; LOCATION for area/location questions; VISIT for a viewing/visit request; NEGOTIATION for price haggling; DOC_PAYMENT for document or payment questions; COMPLAINT for grievances; FOLLOW_UP for chasing a prior thread; NOT_INTERESTED if they decline; SPAM for irrelevant/spam.
 - urgency: HIGH for "today", "ASAP", "tomorrow morning"; MEDIUM for "this week" or "looking to move soon"; LOW for casual browsing.
+- sentiment: POSITIVE for keen/happy; NEGATIVE for upset/frustrated/declining; NEUTRAL otherwise.
 - lead_summary: plain English description of what the sender wants.
+- suggested_action: a concrete next step, e.g. "Send 2-3 DHA Phase 8 apartments under 3 crore" or "Schedule a viewing for this weekend".
 - suggested_pref_type: infer if mentioned; null if unclear. Never invent new types.
 - suggested_pref_area: text area name if mentioned (e.g. "DHA Phase 5"). Null if unclear.
 - suggested_budget_pkr: integer PKR if mentioned. Parse "2 crore" as 20000000, "50 lakh" as 5000000. Null if unclear.
@@ -179,6 +215,18 @@ export function validateClassification(obj: Record<string, unknown>): WhatsAppCl
       : null;
 
   if (!lead_summary) return null;
+
+  const sentiment = typeof obj.sentiment === "string" && VALID_SENTIMENTS.has(obj.sentiment as never)
+    ? (obj.sentiment as WhatsAppClassification["sentiment"])
+    : "NEUTRAL";
+  const display_intent =
+    typeof obj.display_intent === "string" && VALID_DISPLAY_INTENTS.has(obj.display_intent as never)
+      ? (obj.display_intent as WhatsAppClassification["display_intent"])
+      : INTENT_TO_DISPLAY[intent];
+  const suggested_action = typeof obj.suggested_action === "string"
+    ? obj.suggested_action.slice(0, 120)
+    : "";
+
   return {
     intent,
     urgency,
@@ -186,5 +234,8 @@ export function validateClassification(obj: Record<string, unknown>): WhatsAppCl
     suggested_pref_type,
     suggested_pref_area,
     suggested_budget_pkr,
+    sentiment,
+    suggested_action,
+    display_intent,
   };
 }

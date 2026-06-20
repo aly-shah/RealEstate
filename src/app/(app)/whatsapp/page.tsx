@@ -166,6 +166,15 @@ export default async function WhatsappInboxPage({
   );
   const pageItems = sorted.slice(skip, skip + pageSize);
 
+  // Copilot insights for the visible conversations (one row per company+phone).
+  const insightRows = pageItems.length
+    ? await prisma.whatsAppConversationInsight.findMany({
+        where: { companyId, phone: { in: pageItems.map((c) => c.phone) } },
+        select: { phone: true, intent: true, urgency: true, sentiment: true, suggestedAction: true, leadId: true },
+      })
+    : [];
+  const insightByPhone = new Map(insightRows.map((i) => [i.phone, i]));
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -183,45 +192,45 @@ export default async function WhatsappInboxPage({
         </Section>
       ) : (
         <Section title="Recent conversations">
-          <Table head={["Phone", "Last message", "Intent / urgency", "Counts", "When", ""]}>
-            {pageItems.map((c) => (
-              <tr key={c.phone} className="hover:bg-line-soft">
-                <Td className="font-mono text-sm">{c.phone}</Td>
-                <Td className="max-w-[28ch] truncate text-sm" title={c.latest.summary}>
-                  {c.latest.summary}
-                </Td>
-                <Td>
-                  {c.latest.intent || c.latest.urgency ? (
-                    <div className="flex flex-wrap gap-1">
-                      {c.latest.intent && (
-                        <Badge tone="accent">{humanize(c.latest.intent)}</Badge>
-                      )}
-                      {c.latest.urgency && (
-                        <Badge tone={urgencyTone(c.latest.urgency)}>
-                          {humanize(c.latest.urgency)}
-                        </Badge>
-                      )}
-                    </div>
-                  ) : (
-                    <span className="text-xs text-muted">—</span>
-                  )}
-                </Td>
-                <Td className="text-xs text-muted">
-                  ↓ {c.inboundCount} · ↑ {c.outboundCount}
-                </Td>
-                <Td className="text-xs text-muted whitespace-nowrap">
-                  {fmtDateTime(c.latest.createdAt)}
-                </Td>
-                <Td>
-                  <Link
-                    href={`/whatsapp?phone=${encodeURIComponent(c.phone)}`}
-                    className="btn-ghost px-2 py-1 text-xs"
-                  >
-                    Open
-                  </Link>
-                </Td>
-              </tr>
-            ))}
+          <Table head={["Phone", "Last message", "AI insight", "Counts", "When", ""]}>
+            {pageItems.map((c) => {
+              const ai = insightByPhone.get(c.phone);
+              const intent = ai?.intent ?? c.latest.intent;
+              const urgency = ai?.urgency ?? c.latest.urgency;
+              return (
+                <tr key={c.phone} className="hover:bg-line-soft">
+                  <Td className="font-mono text-sm">{c.phone}</Td>
+                  <Td className="max-w-[28ch] text-sm">
+                    <p className="truncate" title={c.latest.summary}>{c.latest.summary}</p>
+                    {ai?.suggestedAction && (
+                      <p className="mt-0.5 truncate text-xs text-accent" title={ai.suggestedAction}>💡 {ai.suggestedAction}</p>
+                    )}
+                  </Td>
+                  <Td>
+                    {intent || urgency || ai?.sentiment ? (
+                      <div className="flex flex-wrap gap-1">
+                        {intent && <Badge tone="accent">{humanize(intent)}</Badge>}
+                        {urgency && <Badge tone={urgencyTone(urgency)}>{humanize(urgency)}</Badge>}
+                        {ai?.sentiment && ai.sentiment !== "NEUTRAL" && (
+                          <Badge tone={sentimentTone(ai.sentiment)}>{humanize(ai.sentiment)}</Badge>
+                        )}
+                      </div>
+                    ) : (
+                      <span className="text-xs text-muted">—</span>
+                    )}
+                  </Td>
+                  <Td className="text-xs text-muted">↓ {c.inboundCount} · ↑ {c.outboundCount}</Td>
+                  <Td className="text-xs text-muted whitespace-nowrap">{fmtDateTime(c.latest.createdAt)}</Td>
+                  <Td>
+                    {ai?.leadId ? (
+                      <Link href={`/leads/${ai.leadId}`} className="btn-ghost px-2 py-1 text-xs">Lead →</Link>
+                    ) : (
+                      <Link href={`/whatsapp?phone=${encodeURIComponent(c.phone)}`} className="btn-ghost px-2 py-1 text-xs">Open</Link>
+                    )}
+                  </Td>
+                </tr>
+              );
+            })}
           </Table>
           <Pagination page={page} pageSize={pageSize} total={sorted.length} />
         </Section>
@@ -278,6 +287,10 @@ function directionTone(action: string): "accent" | "ok" | "warn" | "danger" | "n
 
 function urgencyTone(u: string): "ok" | "warn" | "danger" {
   return u === "HIGH" ? "danger" : u === "MEDIUM" ? "warn" : "ok";
+}
+
+function sentimentTone(s: string): "ok" | "neutral" | "danger" {
+  return s === "POSITIVE" ? "ok" : s === "NEGATIVE" ? "danger" : "neutral";
 }
 
 function classificationChips(meta: unknown) {

@@ -1362,6 +1362,28 @@ model SweepState {
   updatedAt DateTime @default(now()) @updatedAt
 }
 
+/// AI Copilot conversation insight — one row per (company, phone), refreshed on
+/// each inbound WhatsApp message. Drives the inbox intent/urgency/sentiment
+/// badges + suggested action. Tenant-scoped via companyId.
+model WhatsAppConversationInsight {
+  id              String   @id @default(cuid())
+  companyId       String
+  leadId          String?
+  clientId        String?
+  phone           String
+  intent          String // NEW_BUYER, NEW_RENTAL, BUDGET, LOCATION, VISIT, NEGOTIATION, DOC_PAYMENT, COMPLAINT, FOLLOW_UP, NOT_INTERESTED, SPAM
+  urgency         String // LOW, MEDIUM, HIGH
+  sentiment       String // POSITIVE, NEUTRAL, NEGATIVE
+  summary         String?
+  suggestedAction String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @default(now()) @updatedAt
+
+  // One insight per conversation (company + phone) — upserted each inbound.
+  @@unique([companyId, phone])
+  @@index([companyId, leadId])
+}
+
 /// QR-linked (unofficial / Baileys) WhatsApp session status per company. The
 /// actual auth credentials live on disk (per-company session dir); this row only
 /// tracks linking status for the UI.

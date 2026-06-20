@@ -68,10 +68,12 @@ export const whatsappInboundHandler: JobHandler = async ({ payload, companyId })
   // Capture as a lead only for a claimed line with a known sender, and skip
   // clearly off-topic chatter when we have a classification to judge by.
   let leadId: string | null = null;
+  let clientId: string | null = null;
   let leadCreated = false;
   if (companyId && from && (!classification || classification.intent !== "OFF_TOPIC")) {
     const captured = await captureLead({ companyId, from, profileName, text, classification });
     leadId = captured.leadId;
+    clientId = captured.clientId;
     leadCreated = captured.created;
   }
 
@@ -86,6 +88,26 @@ export const whatsappInboundHandler: JobHandler = async ({ payload, companyId })
         meta: { from, text, raw: p, classification, leadId, leadCreated } as unknown as Prisma.InputJsonObject,
       },
     });
+  }
+
+  // Copilot: refresh the conversation insight (one row per company+phone). Only
+  // overwrites the lead/client link when we have one, so a later spam message
+  // can't unlink a real conversation. Best-effort — never blocks inbound.
+  if (companyId && from && classification) {
+    const core = {
+      intent: classification.display_intent,
+      urgency: classification.urgency,
+      sentiment: classification.sentiment,
+      summary: classification.lead_summary,
+      suggestedAction: classification.suggested_action || null,
+    };
+    await prisma.whatsAppConversationInsight
+      .upsert({
+        where: { companyId_phone: { companyId, phone: from } },
+        create: { companyId, phone: from, leadId, clientId, ...core },
+        update: { ...core, ...(leadId ? { leadId } : {}), ...(clientId ? { clientId } : {}) },
+      })
+      .catch(() => {});
   }
 
   return {
@@ -111,7 +133,7 @@ async function captureLead(input: {
   profileName: string | null;
   text: string | null;
   classification: WhatsAppClassification | null;
-}): Promise<{ leadId: string | null; created: boolean }> {
+}): Promise<{ leadId: string | null; clientId: string | null; created: boolean }> {
   const { companyId, from, profileName, text, classification } = input;
 
   // Phone variants for dedup — Meta's wa_id is canonical (92…); also try the
@@ -135,7 +157,7 @@ async function captureLead(input: {
     });
     if (open) {
       await prisma.lead.update({ where: { id: open.id }, data: { updatedAt: new Date() } });
-      return { leadId: open.id, created: false };
+      return { leadId: open.id, clientId: client.id, created: false };
     }
   } else {
     client = await prisma.client.create({
@@ -179,7 +201,7 @@ async function captureLead(input: {
   // then waits in the Unassigned bucket for office triage).
   await routeForCompany(lead.id, companyId);
 
-  return { leadId: lead.id, created: true };
+  return { leadId: lead.id, clientId: client.id, created: true };
 }
 
 /**
