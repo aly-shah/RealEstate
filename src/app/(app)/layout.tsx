@@ -5,6 +5,7 @@ import { ROLE_LABELS, can } from "@/lib/rbac";
 import { Sidebar } from "@/components/shell/Sidebar";
 import { Topbar } from "@/components/shell/Topbar";
 import { AgentBottomNav } from "@/components/shell/AgentBottomNav";
+import { PwaSetup } from "@/components/pwa/PwaSetup";
 import { Toaster } from "@/components/ui/Toaster";
 import { getDict } from "@/lib/i18n/server";
 import { readFlash } from "@/lib/flash";
@@ -55,6 +56,7 @@ export default async function AppLayout({
         </main>
       </div>
       {isAgent && <AgentBottomNav unreadCount={unreadCount} dict={dict} />}
+      <PwaSetup />
       {/* key per flash → fresh mount per message (no setState-in-effect sync). */}
       <Toaster key={flash ? `${flash.tone}:${flash.message}` : "none"} initial={flash} />
     </div>
