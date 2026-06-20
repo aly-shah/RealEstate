@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Pagination } from "@/components/ui/Pagination";
 import { parsePage } from "@/lib/pagination";
+import { WhatsAppReplies } from "./WhatsAppReplies";
 
 /**
  * Phase-9.5 follow-up — WhatsApp inbox. Reads ActivityLog rows produced
@@ -100,6 +101,11 @@ export default async function WhatsappInboxPage({
             />
           </Section>
         ) : (
+          <Section title="Copilot">
+            <WhatsAppReplies phone={phoneFilter} />
+          </Section>
+        )}
+        {filtered.length > 0 && (
           <Section title="Timeline">
             <ul className="divide-y divide-line-soft">
               {filtered.map((r) => (
@@ -197,9 +203,13 @@ export default async function WhatsappInboxPage({
               const ai = insightByPhone.get(c.phone);
               const intent = ai?.intent ?? c.latest.intent;
               const urgency = ai?.urgency ?? c.latest.urgency;
+              const risk = conversationRisk(c.latest.action, c.latest.createdAt, ai);
               return (
                 <tr key={c.phone} className="hover:bg-line-soft">
-                  <Td className="font-mono text-sm">{c.phone}</Td>
+                  <Td className="text-sm">
+                    <span className="font-mono">{c.phone}</span>
+                    {risk && <div className="mt-1"><Badge tone={risk.tone}>{risk.label}</Badge></div>}
+                  </Td>
                   <Td className="max-w-[28ch] text-sm">
                     <p className="truncate" title={c.latest.summary}>{c.latest.summary}</p>
                     {ai?.suggestedAction && (
@@ -291,6 +301,23 @@ function urgencyTone(u: string): "ok" | "warn" | "danger" {
 
 function sentimentTone(s: string): "ok" | "neutral" | "danger" {
   return s === "POSITIVE" ? "ok" : s === "NEGATIVE" ? "danger" : "neutral";
+}
+
+/** Follow-up risk for a conversation — surfaced as a triage badge. Reads the
+ *  clock internally so it isn't an impure call in the page's render body. */
+function conversationRisk(
+  latestAction: string,
+  latestAt: Date,
+  insight: { urgency?: string | null; intent?: string | null } | undefined,
+): { label: string; tone: "danger" | "warn" | "neutral" } | null {
+  if (insight?.intent === "NOT_INTERESTED") return { label: "Likely lost", tone: "neutral" };
+  // The client is waiting only when the most recent message was inbound.
+  if (latestAction !== "whatsapp.inbound") return null;
+  const days = (Date.now() - latestAt.getTime()) / 86_400_000;
+  if (days >= 3) return { label: "No reply in 3 days", tone: "danger" };
+  if (insight?.urgency === "HIGH" || insight?.intent === "VISIT") return { label: "Hot lead waiting", tone: "danger" };
+  if (days >= 1) return { label: "Awaiting reply", tone: "warn" };
+  return null;
 }
 
 function classificationChips(meta: unknown) {
