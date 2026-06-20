@@ -20,6 +20,7 @@ import { WhatsAppButton } from "@/components/whatsapp/WhatsAppButton";
 import { MobileLeadActions } from "@/components/lead/MobileLeadActions";
 import { TEMPLATES } from "@/lib/whatsapp";
 import { LeadAiPanel } from "@/components/lead/LeadAiPanel";
+import { LeadSalesAssistant } from "@/components/lead/LeadSalesAssistant";
 import { WhatsAppSend } from "@/components/lead/WhatsAppSend";
 import { ClientPortalControl } from "@/components/lead/ClientPortalControl";
 import { setClientConsent } from "@/app/(app)/leads/actions";
@@ -243,6 +244,12 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
               <p className="text-sm text-ink">{lead.agent?.name ?? "Unassigned"}</p>
             )}
           </Section>
+
+          {showAi && (
+            <Section title="AI Sales Assistant">
+              <LeadSalesAssistant leadId={lead.id} />
+            </Section>
+          )}
 
           {showAi && (
             <Section title="AI assistant">

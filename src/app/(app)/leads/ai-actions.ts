@@ -5,6 +5,36 @@ import { logActivity } from "@/lib/activity";
 import { suggestLeadNextAction } from "@/lib/ai/handlers/lead-next-action";
 import { draftLeadReply } from "@/lib/ai/handlers/lead-reply-draft";
 import { generateLeadBrief } from "@/lib/ai/handlers/lead-brief";
+import { generateLeadSalesPlan, type LeadSalesPlan } from "@/lib/ai/handlers/lead-sales-plan";
+
+export interface AiSalesPlanResult {
+  ok: boolean;
+  plan?: LeadSalesPlan;
+  fromCache?: boolean;
+  reason?: string;
+}
+
+/**
+ * AI Sales Assistant — structured conversion plan for a lead (probability,
+ * reasons, next actions, suggested WhatsApp message). Tenant-scoped twice
+ * (requireCompanyUser + the handler's `where: { companyId }`).
+ */
+export async function aiLeadSalesPlan(leadId: string): Promise<AiSalesPlanResult> {
+  const user = await requireCompanyUser();
+  const result = await generateLeadSalesPlan({ companyId: user.companyId, leadId });
+  if (!result.ok) return { ok: false, reason: result.reason };
+  if (!result.fromCache) {
+    await logActivity({
+      companyId: user.companyId,
+      userId: user.id,
+      action: "ai.lead_sales_plan",
+      entityType: "LEAD",
+      entityId: leadId,
+      summary: `AI sales plan (${result.plan.conversionProbability}% conversion)`,
+    });
+  }
+  return { ok: true, plan: result.plan, fromCache: result.fromCache };
+}
 
 export interface AiActionResult {
   ok: boolean;
