@@ -97,38 +97,54 @@ export interface AgentRanking {
   conversion: number;
 }
 
-/** Leaderboard: agents ranked by closed-deal revenue. */
+/** Leaderboard: agents ranked by closed-deal revenue.
+ *  Lead totals come from two DB groupBys (not per-agent row fetches); revenue
+ *  from the bounded set of CLOSED_WON deals (far fewer than all leads/deals). */
 export async function agentLeaderboard(companyId: string): Promise<AgentRanking[]> {
-  const agents = await prisma.user.findMany({
-    where: { companyId, role: "AGENT" },
-    select: {
-      id: true,
-      name: true,
-      assignedLeads: { select: { stage: true } },
-      dealLinks: {
-        where: { role: "MAIN" },
-        select: {
-          deal: {
-            select: { status: true, sale: { select: { salePrice: true } }, rental: { select: { monthlyRent: true } } },
-          },
-        },
+  const [agents, leadCounts, wonLeadCounts, wonDeals] = await Promise.all([
+    prisma.user.findMany({ where: { companyId, role: "AGENT" }, select: { id: true, name: true } }),
+    prisma.lead.groupBy({
+      by: ["agentId"],
+      where: { companyId, agentId: { not: null } },
+      _count: { _all: true },
+    }),
+    prisma.lead.groupBy({
+      by: ["agentId"],
+      where: { companyId, agentId: { not: null }, stage: "CLOSED_WON" },
+      _count: { _all: true },
+    }),
+    prisma.deal.findMany({
+      where: { companyId, status: "CLOSED_WON" },
+      select: {
+        sale: { select: { salePrice: true } },
+        rental: { select: { monthlyRent: true } },
+        agents: { where: { role: "MAIN" }, select: { agentId: true } },
       },
-    },
-  });
+    }),
+  ]);
+
+  const leadMap = new Map(leadCounts.map((g) => [g.agentId, g._count._all]));
+  const wonLeadMap = new Map(wonLeadCounts.map((g) => [g.agentId, g._count._all]));
+  const dealAgg = new Map<string, { revenue: number; dealsWon: number }>();
+  for (const d of wonDeals) {
+    const agentId = d.agents[0]?.agentId;
+    if (!agentId) continue;
+    const value = toNumber(d.sale?.salePrice) + toNumber(d.rental?.monthlyRent);
+    const cur = dealAgg.get(agentId) ?? { revenue: 0, dealsWon: 0 };
+    cur.revenue += value;
+    cur.dealsWon += 1;
+    dealAgg.set(agentId, cur);
+  }
 
   const ranked = agents.map((a) => {
-    const won = a.dealLinks.filter((d) => d.deal.status === "CLOSED_WON");
-    const revenue = won.reduce(
-      (sum, d) => sum + toNumber(d.deal.sale?.salePrice) + toNumber(d.deal.rental?.monthlyRent),
-      0,
-    );
-    const leads = a.assignedLeads.length;
-    const wonLeads = a.assignedLeads.filter((l) => l.stage === "CLOSED_WON").length;
+    const leads = leadMap.get(a.id) ?? 0;
+    const wonLeads = wonLeadMap.get(a.id) ?? 0;
+    const da = dealAgg.get(a.id) ?? { revenue: 0, dealsWon: 0 };
     return {
       id: a.id,
       name: a.name,
-      dealsWon: won.length,
-      revenue,
+      dealsWon: da.dealsWon,
+      revenue: da.revenue,
       leads,
       conversion: leads ? Math.round((wonLeads / leads) * 100) : 0,
     };
@@ -236,48 +252,51 @@ export interface PayoutSummary {
  *   - COMPANY                  → aggregated under a single "Company" line
  */
 export async function payoutSummary(companyId: string): Promise<PayoutSummary> {
-  const shares = await prisma.commissionShare.findMany({
+  // DB aggregation: summed amounts per (party, paid, recipient) instead of every
+  // CommissionShare row. Names resolved with one bounded lookup each.
+  const grouped = await prisma.commissionShare.groupBy({
+    by: ["party", "paid", "userId", "dealerId"],
     where: { commission: { companyId, status: { in: ["APPROVED", "PAID"] } } },
-    select: {
-      party: true,
-      amount: true,
-      paid: true,
-      userId: true,
-      dealerId: true,
-      user: { select: { id: true, name: true } },
-      dealer: { select: { id: true, name: true } },
-    },
+    _sum: { amount: true },
   });
+
+  const userIds = [...new Set(grouped.map((g) => g.userId).filter((x): x is string => !!x))];
+  const dealerIds = [...new Set(grouped.map((g) => g.dealerId).filter((x): x is string => !!x))];
+  const [users, dealers] = await Promise.all([
+    userIds.length ? prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, name: true } }) : [],
+    dealerIds.length ? prisma.dealer.findMany({ where: { id: { in: dealerIds } }, select: { id: true, name: true } }) : [],
+  ]);
+  const userName = new Map(users.map((u) => [u.id, u.name]));
+  const dealerName = new Map(dealers.map((d) => [d.id, d.name]));
 
   const recipMap = new Map<string, PayoutByRecipient>();
   const partyMap: Record<string, { paid: number; pending: number }> = {};
   let totalPaid = 0;
   let totalPending = 0;
 
-  for (const s of shares) {
-    const amt = toNumber(s.amount);
-    if (s.paid) totalPaid += amt;
+  for (const g of grouped) {
+    const amt = toNumber(g._sum.amount);
+    if (g.paid) totalPaid += amt;
     else totalPending += amt;
 
-    if (!partyMap[s.party]) partyMap[s.party] = { paid: 0, pending: 0 };
-    partyMap[s.party][s.paid ? "paid" : "pending"] += amt;
+    if (!partyMap[g.party]) partyMap[g.party] = { paid: 0, pending: 0 };
+    partyMap[g.party][g.paid ? "paid" : "pending"] += amt;
 
-    // Identity key per recipient — collapses multiple shares to one row.
     let key: string;
     let name: string;
-    if (s.party === "COMPANY") {
+    if (g.party === "COMPANY") {
       key = "company";
       name = "Company";
-    } else if (s.party === "DEALER") {
-      key = `dealer:${s.dealerId ?? "unknown"}`;
-      name = s.dealer?.name ?? "Unknown dealer";
+    } else if (g.party === "DEALER") {
+      key = `dealer:${g.dealerId ?? "unknown"}`;
+      name = dealerName.get(g.dealerId ?? "") ?? "Unknown dealer";
     } else {
-      key = `user:${s.userId ?? "unknown"}`;
-      name = s.user?.name ?? "Unknown agent";
+      key = `user:${g.userId ?? "unknown"}`;
+      name = userName.get(g.userId ?? "") ?? "Unknown agent";
     }
 
-    const existing = recipMap.get(key) ?? { id: key, name, party: s.party, paid: 0, pending: 0 };
-    existing[s.paid ? "paid" : "pending"] += amt;
+    const existing = recipMap.get(key) ?? { id: key, name, party: g.party, paid: 0, pending: 0 };
+    existing[g.paid ? "paid" : "pending"] += amt;
     recipMap.set(key, existing);
   }
 
