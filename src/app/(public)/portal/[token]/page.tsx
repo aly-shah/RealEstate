@@ -16,10 +16,63 @@ async function getClient(token: string) {
     select: {
       id: true,
       name: true,
+      phone: true,
+      type: true,
       companyId: true,
       company: { select: { name: true, logoUrl: true, brandColor: true } },
     },
   });
+}
+
+/** A document we can hand the client a working download link for (vs a placeholder). */
+function isServableDoc(url: string): boolean {
+  return /^https?:\/\//i.test(url) || url.startsWith("/api/files/");
+}
+
+// Pipeline stages that count as a live "offer" on a seller's listing.
+const OFFER_STATUSES = ["NEGOTIATION", "TOKEN", "BOOKED", "AGREEMENT"] as const;
+
+/**
+ * Seller view data: the listings this client owns (matched by owner phone within
+ * the tenant) and the engagement on each — views, interested leads, scheduled/
+ * completed showings, and live offers (deals in negotiation+). Returns null when
+ * the client has no phone or owns no listings, so the portal stays buyer-only.
+ */
+async function sellerListings(companyId: string, phone: string | null) {
+  if (!phone) return null;
+  const listings = await prisma.property.findMany({
+    where: { companyId, ownerPhone: phone },
+    select: {
+      id: true, reference: true, title: true, type: true, listingType: true, status: true,
+      city: true, area: true, salePrice: true, monthlyRent: true,
+    },
+    orderBy: { createdAt: "desc" },
+  });
+  if (listings.length === 0) return null;
+
+  const ids = listings.map((p) => p.id);
+  const [views, leadCounts, showingCounts, offerCounts] = await Promise.all([
+    prisma.propertyView.groupBy({ by: ["propertyId"], where: { companyId, propertyId: { in: ids } }, _count: { _all: true } }),
+    prisma.lead.groupBy({ by: ["propertyId"], where: { companyId, propertyId: { in: ids } }, _count: { _all: true } }),
+    prisma.showing.groupBy({ by: ["propertyId"], where: { companyId, propertyId: { in: ids } }, _count: { _all: true } }),
+    prisma.deal.groupBy({ by: ["propertyId"], where: { companyId, propertyId: { in: ids }, status: { in: [...OFFER_STATUSES] } }, _count: { _all: true } }),
+  ]);
+  const toMap = (rows: { propertyId: string | null; _count: { _all: number } }[]) =>
+    new Map(rows.map((r) => [r.propertyId, r._count._all]));
+  const vMap = toMap(views), lMap = toMap(leadCounts), sMap = toMap(showingCounts), oMap = toMap(offerCounts);
+
+  const rows = listings.map((p) => ({
+    ...p,
+    views: vMap.get(p.id) ?? 0,
+    leads: lMap.get(p.id) ?? 0,
+    showings: sMap.get(p.id) ?? 0,
+    offers: oMap.get(p.id) ?? 0,
+  }));
+  const totals = rows.reduce(
+    (t, r) => ({ views: t.views + r.views, leads: t.leads + r.leads, offers: t.offers + r.offers }),
+    { views: 0, leads: 0, offers: 0 },
+  );
+  return { rows, totals, count: rows.length };
 }
 
 function Unavailable() {
@@ -62,7 +115,7 @@ export default async function ClientPortalPage({ params }: { params: Promise<{ t
     ...new Set([...leads.map((l) => l.propertyId), ...showings.map((s) => s.propertyId)].filter((x): x is string => !!x)),
   ];
 
-  const [properties, appointments, deals, agent] = await Promise.all([
+  const [properties, appointments, deals, agent, documents, sellerData] = await Promise.all([
     propIds.length
       ? prisma.property.findMany({
           where: { id: { in: propIds }, companyId: client.companyId },
@@ -106,6 +159,16 @@ export default async function ClientPortalPage({ params }: { params: Promise<{ t
         ? prisma.user.findUnique({ where: { id: agentId }, select: { name: true, phone: true } })
         : null;
     })(),
+    // Documents shared with this client (verified contracts, receipts, etc.).
+    prisma.document.findMany({
+      where: { companyId: client.companyId, clientId: client.id },
+      orderBy: { version: "desc" },
+      take: 20,
+      select: { id: true, name: true, type: true, url: true, verification: true, expiryDate: true },
+    }),
+    // Seller view: properties this client owns (matched by owner phone) + the
+    // engagement on each. Only runs when the client has a phone on file.
+    sellerListings(client.companyId, client.phone),
   ]);
 
   const priceLine = (p: { salePrice: unknown; monthlyRent: unknown }) =>
@@ -136,8 +199,51 @@ export default async function ClientPortalPage({ params }: { params: Promise<{ t
       <main className="mx-auto max-w-3xl space-y-6 px-5 py-6">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-ink">Welcome, {client.name}</h1>
-          <p className="mt-1 text-sm text-slate">Your property shortlist, appointments and payments — all in one place.</p>
+          <p className="mt-1 text-sm text-slate">
+            {sellerData
+              ? "Track interest in your listings, plus your appointments and documents — all in one place."
+              : "Your property shortlist, appointments and payments — all in one place."}
+          </p>
         </div>
+
+        {/* Seller dashboard — engagement on the client's own listings */}
+        {sellerData && (
+          <section className="surface p-5">
+            <h2 className="mb-3 text-sm font-semibold text-ink">Your listings</h2>
+            <div className="mb-4 grid grid-cols-3 gap-3">
+              {[
+                { label: "Total views", value: sellerData.totals.views },
+                { label: "Interested leads", value: sellerData.totals.leads },
+                { label: "Live offers", value: sellerData.totals.offers },
+              ].map((s) => (
+                <div key={s.label} className="rounded-xl border border-line bg-paper p-3 text-center">
+                  <p className="text-2xl font-bold leading-none" style={{ color: accent }}>{s.value}</p>
+                  <p className="mt-1 text-[11px] text-muted">{s.label}</p>
+                </div>
+              ))}
+            </div>
+            <ul className="space-y-2">
+              {sellerData.rows.map((p) => (
+                <li key={p.id} className="rounded-xl border border-line bg-paper p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium text-ink">{p.title}</p>
+                      <p className="text-xs text-muted">{[p.area, p.city].filter(Boolean).join(", ")} · {humanize(p.type)}</p>
+                      <p className="mt-0.5 text-sm font-semibold" style={{ color: accent }}>{priceLine(p)}</p>
+                    </div>
+                    <StatusBadge status={p.status} />
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate">
+                    <span>👁 {p.views} views</span>
+                    <span>👤 {p.leads} leads</span>
+                    <span>📅 {p.showings} showings</span>
+                    <span>💬 {p.offers} offers</span>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
 
         {/* Shortlist */}
         <section className="surface p-5">
@@ -232,6 +338,43 @@ export default async function ClientPortalPage({ params }: { params: Promise<{ t
                 </div>
               ))}
             </div>
+          </section>
+        )}
+
+        {/* Documents */}
+        {documents.length > 0 && (
+          <section className="surface p-5">
+            <h2 className="mb-3 text-sm font-semibold text-ink">Documents</h2>
+            <ul className="divide-y divide-line">
+              {documents.map((d) => {
+                const expired = !!d.expiryDate && d.expiryDate < new Date();
+                return (
+                  <li key={d.id} className="flex items-center justify-between gap-3 py-2 text-sm">
+                    <div className="min-w-0">
+                      <p className="truncate font-medium text-ink">{d.name}</p>
+                      <p className="text-xs text-muted">
+                        {humanize(d.type)}
+                        {d.expiryDate && <span className={expired ? "text-danger" : ""}> · {expired ? "expired" : "expires"} {fmtDate(d.expiryDate)}</span>}
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <StatusBadge status={d.verification} />
+                      {isServableDoc(d.url) && (
+                        <a
+                          href={`/api/public/portal-doc/${token}/${d.id}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs font-semibold"
+                          style={{ color: accent }}
+                        >
+                          View →
+                        </a>
+                      )}
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
           </section>
         )}
 
