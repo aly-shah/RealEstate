@@ -4,12 +4,14 @@ import { prisma } from "@/lib/prisma";
 import { requireCompanyUser } from "@/lib/session";
 import { isScopedToSelf } from "@/lib/session";
 import { commissionTotals } from "@/lib/metrics";
+import { companyCommissionForecast, agentCommissionForecast } from "@/lib/commissions/forecast";
 import { money, fmtDate, toNumber } from "@/lib/format";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Table, Td } from "@/components/ui/Table";
 import { StatusBadge } from "@/components/ui/Badge";
 import { StatCard } from "@/components/ui/StatCard";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { OwnerForecast, AgentForecastCards } from "./ForecastPanels";
 
 export default async function CommissionsPage() {
   const user = await requireCompanyUser();
@@ -28,14 +30,17 @@ export default async function CommissionsPage() {
     }
   }
 
-  const [commissions, totals] = await Promise.all([
+  const isOffice = !isScopedToSelf(user.role);
+  const [commissions, totals, ownerForecast, agentForecast] = await Promise.all([
     prisma.commission.findMany({
       where,
       include: { deal: { include: { property: true } }, shares: true },
       orderBy: { createdAt: "desc" },
       take: 100,
     }),
-    isScopedToSelf(user.role) ? null : commissionTotals(user.companyId),
+    isOffice ? commissionTotals(user.companyId) : null,
+    isOffice ? companyCommissionForecast(user.companyId) : null,
+    user.role === "AGENT" ? agentCommissionForecast(user.companyId, user.id) : null,
   ]);
 
   return (
@@ -49,6 +54,9 @@ export default async function CommissionsPage() {
           <StatCard label="Pending" value={money(totals.pending)} />
         </div>
       )}
+
+      {ownerForecast && <OwnerForecast data={ownerForecast} />}
+      {agentForecast && <AgentForecastCards data={agentForecast} />}
 
       {commissions.length === 0 ? (
         <EmptyState title="No commissions yet" hint="Commissions appear when a deal is closed-won and split." />
