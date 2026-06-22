@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { Prisma } from "@prisma/client";
-import { prisma } from "@/lib/prisma";
+import { prisma, runUnscoped } from "@/lib/prisma";
 import { requireCompanyUser } from "@/lib/session";
 import { can } from "@/lib/rbac";
 import { logActivity } from "@/lib/activity";
@@ -132,10 +132,10 @@ export async function recomputeInvoiceStatus(invoiceId: string): Promise<void> {
   if (!invoice) return;
   if (invoice.status === "DRAFT" || invoice.status === "CANCELLED") return;
 
-  const agg = await prisma.payment.aggregate({
-    where: { invoiceId, status: "PAID" },
-    _sum: { amount: true },
-  });
+  const agg = await runUnscoped(
+    "scoped to a single tenant-owned invoice (invoiceId), already fetched under tenant scope",
+    () => prisma.payment.aggregate({ where: { invoiceId, status: "PAID" }, _sum: { amount: true } }),
+  );
   const paid = toNumber(agg._sum.amount);
   const total = toNumber(invoice.amount);
 

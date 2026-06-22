@@ -1,5 +1,5 @@
 import { requireUser } from "@/lib/session";
-import { prisma } from "@/lib/prisma";
+import { prisma, runUnscoped } from "@/lib/prisma";
 import { navForRole } from "@/lib/nav";
 import { ROLE_LABELS, can } from "@/lib/rbac";
 import { Sidebar } from "@/components/shell/Sidebar";
@@ -22,7 +22,9 @@ export default async function AppLayout({
     user.companyId
       ? prisma.company.findUnique({ where: { id: user.companyId }, select: { name: true } })
       : null,
-    prisma.notification.count({ where: { userId: user.id, read: false } }),
+    runUnscoped("notifications are per-user (userId), not company-scoped", () =>
+      prisma.notification.count({ where: { userId: user.id, read: false } }),
+    ),
     // Reads the flash cookie set by any recent server action so the Toaster can
     // show it; the Toaster clears the cookie client-side (render can't write it).
     readFlash(),

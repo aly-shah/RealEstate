@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/session";
-import { prisma } from "@/lib/prisma";
+import { prisma, runUnscoped } from "@/lib/prisma";
 import { fmtDateTime, humanize } from "@/lib/format";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -10,11 +10,15 @@ import { markRead, markAllRead } from "./actions";
 export default async function NotificationsPage() {
   const user = await requireUser();
 
-  const notifications = await prisma.notification.findMany({
-    where: { userId: user.id },
-    orderBy: { createdAt: "desc" },
-    take: 100,
-  });
+  const notifications = await runUnscoped(
+    "notifications are per-user (userId), not company-scoped",
+    () =>
+      prisma.notification.findMany({
+        where: { userId: user.id },
+        orderBy: { createdAt: "desc" },
+        take: 100,
+      }),
+  );
   const unread = notifications.filter((n) => !n.read).length;
 
   return (

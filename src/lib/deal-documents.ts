@@ -1,5 +1,5 @@
 import type { DocumentType } from "@prisma/client";
-import { prisma } from "@/lib/prisma";
+import { prisma, runUnscoped } from "@/lib/prisma";
 import { ensureContractForDeal } from "@/lib/contract-service";
 
 /**
@@ -93,10 +93,10 @@ export async function syncDealDocuments(dealId: string): Promise<number> {
   const kinds = dealDocKinds(isSale);
 
   const prefix = `/deal-documents/${dealId}/`;
-  const existing = await prisma.document.findMany({
-    where: { dealId, url: { startsWith: prefix } },
-    select: { id: true, url: true },
-  });
+  const existing = await runUnscoped(
+    "scoped to a single tenant-owned deal (dealId)",
+    () => prisma.document.findMany({ where: { dealId, url: { startsWith: prefix } }, select: { id: true, url: true } }),
+  );
   const byUrl = new Map(existing.map((d) => [d.url, d.id]));
   const wantedUrls = new Set(kinds.map((k) => dealDocRoute(dealId, k)));
 

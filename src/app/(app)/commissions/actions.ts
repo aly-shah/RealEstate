@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { prisma } from "@/lib/prisma";
+import { prisma, runUnscoped } from "@/lib/prisma";
 import { requireCompanyUser } from "@/lib/session";
 import { can } from "@/lib/rbac";
 import { logActivity, notify } from "@/lib/activity";
@@ -143,9 +143,10 @@ export async function markSharePaid(formData: FormData): Promise<void> {
   await prisma.commissionShare.update({ where: { id: shareId }, data: { paid: true, paidAt: new Date() } });
 
   // If every share is paid, close out the commission.
-  const remaining = await prisma.commissionShare.count({
-    where: { commissionId: share.commissionId, paid: false },
-  });
+  const remaining = await runUnscoped(
+    "scoped to a single tenant-owned commission (commissionId)",
+    () => prisma.commissionShare.count({ where: { commissionId: share.commissionId, paid: false } }),
+  );
   if (remaining === 0) {
     await prisma.commission.update({ where: { id: share.commissionId }, data: { status: "PAID" } });
   }
