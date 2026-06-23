@@ -13,7 +13,9 @@ import { generateProjectCopy } from "@/lib/ai/handlers/project-copy";
 export type FormState = { error?: string; fieldErrors?: Record<string, string[]> };
 
 // Project-level facilities/amenities allow-list (mirrors the wizard's checkboxes).
-export const PROJECT_AMENITIES = [
+// NOT exported: a "use server" file may only export async functions, so a value
+// export here breaks module evaluation for every action in the file.
+const PROJECT_AMENITIES = [
   "Swimming Pool", "Gym", "Parking", "Garage", "Shops / Retail", "Lift / Elevator",
   "Backup Generator", "Security / Guards", "CCTV", "Mosque", "Community Park",
   "Kids Play Area", "Clubhouse", "Rooftop Terrace", "Standby Power", "Water Filtration",
