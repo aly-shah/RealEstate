@@ -3,7 +3,8 @@ import { notFound } from "next/navigation";
 import { requireCompanyUser } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { can } from "@/lib/rbac";
-import { money, toNumber, humanize } from "@/lib/format";
+import { money, toNumber, humanize, fmtDate } from "@/lib/format";
+import { MapView, type MapMarker } from "@/components/map/MapView";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Section } from "@/components/ui/Section";
 import { StatCard } from "@/components/ui/StatCard";
@@ -21,7 +22,10 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
 
   const project = await prisma.project.findFirst({
     where: { id, companyId: user.companyId },
-    select: { id: true, name: true, city: true, area: true, status: true, isOffPlan: true, description: true },
+    select: {
+      id: true, name: true, city: true, area: true, status: true, isOffPlan: true, description: true,
+      address: true, latitude: true, longitude: true, totalFloors: true, launchDate: true, completionDate: true, amenities: true,
+    },
   });
   if (!project) notFound();
 
@@ -76,6 +80,39 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
         <StatCard label="Gross inventory value" value={money(gross)} tone="ink" />
         <StatCard label="Sold value" value={money(soldValue)} tone="accent" />
       </div>
+
+      {/* Overview */}
+      {(project.description || project.amenities.length > 0 || project.latitude != null || project.totalFloors != null || project.launchDate || project.address) && (
+        <Section title="Overview" className="mb-6">
+          <div className="grid gap-5 lg:grid-cols-[1.4fr_1fr]">
+            <div>
+              {project.description && <p className="text-sm leading-relaxed text-slate">{project.description}</p>}
+              <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-sm sm:grid-cols-3">
+                {project.totalFloors != null && <div><dt className="text-xs text-muted">Floors</dt><dd className="font-medium text-ink">{project.totalFloors}</dd></div>}
+                <div><dt className="text-xs text-muted">Stage</dt><dd className="font-medium text-ink">{project.isOffPlan ? "Off-plan" : "Ready"}</dd></div>
+                {project.launchDate && <div><dt className="text-xs text-muted">Start</dt><dd className="font-medium text-ink">{fmtDate(project.launchDate)}</dd></div>}
+                {project.completionDate && <div><dt className="text-xs text-muted">Completion</dt><dd className="font-medium text-ink">{fmtDate(project.completionDate)}</dd></div>}
+                {project.address && <div className="col-span-2 sm:col-span-3"><dt className="text-xs text-muted">Address</dt><dd className="font-medium text-ink">{project.address}</dd></div>}
+              </dl>
+              {project.amenities.length > 0 && (
+                <div className="mt-3 flex flex-wrap gap-1.5">
+                  {project.amenities.map((a) => <span key={a} className="chip border-accent-line bg-accent-wash text-accent">{a}</span>)}
+                </div>
+              )}
+            </div>
+            {project.latitude != null && project.longitude != null && (
+              <div className="overflow-hidden rounded-xl border border-line">
+                <MapView
+                  markers={[{ id: project.id, title: project.name, reference: "", lat: project.latitude, lng: project.longitude, status: "AVAILABLE", price: "", href: "#" } satisfies MapMarker]}
+                  height={200}
+                  single
+                  zoom={15}
+                />
+              </div>
+            )}
+          </div>
+        </Section>
+      )}
 
       {/* Price list */}
       <Section title="Unit types & price list" className="mb-6">

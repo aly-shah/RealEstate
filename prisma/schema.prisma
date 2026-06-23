@@ -522,21 +522,31 @@ enum ProjectStatus {
 }
 
 model Project {
-  id          String        @id @default(cuid())
-  companyId   String
-  company     Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  name        String
-  description String?
-  city        String?
-  area        String?
-  isOffPlan   Boolean       @default(false)
-  status      ProjectStatus @default(PLANNING)
-  launchDate  DateTime?
-  createdAt   DateTime      @default(now())
+  id             String        @id @default(cuid())
+  companyId      String
+  company        Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name           String
+  description    String?
+  city           String?
+  area           String?
+  address        String?
+  // Map location, captured via the geocoder in the create-project wizard.
+  latitude       Float?
+  longitude      Float?
+  // Building height (drives the inventory step's floor range).
+  totalFloors    Int?
+  isOffPlan      Boolean       @default(false)
+  status         ProjectStatus @default(PLANNING)
+  // launchDate = construction start; completionDate = expected handover.
+  launchDate     DateTime?
+  completionDate DateTime?
+  // Project-level facilities/amenities (Swimming Pool, Parking, Shops, …).
+  amenities      String[]      @default([])
+  createdAt      DateTime      @default(now())
   // @default(now()) backfills existing rows on migration; @updatedAt drives future updates.
-  updatedAt   DateTime      @default(now()) @updatedAt
-  properties  Property[]
-  unitTypes   UnitType[]
+  updatedAt      DateTime      @default(now()) @updatedAt
+  properties     Property[]
+  unitTypes      UnitType[]
 
   @@index([companyId])
 }

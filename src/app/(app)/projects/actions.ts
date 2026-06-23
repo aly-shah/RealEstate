@@ -8,8 +8,17 @@ import { prisma } from "@/lib/prisma";
 import { requireCompanyUser } from "@/lib/session";
 import { can } from "@/lib/rbac";
 import { logActivity } from "@/lib/activity";
+import { generateProjectCopy } from "@/lib/ai/handlers/project-copy";
 
 export type FormState = { error?: string; fieldErrors?: Record<string, string[]> };
+
+// Project-level facilities/amenities allow-list (mirrors the wizard's checkboxes).
+export const PROJECT_AMENITIES = [
+  "Swimming Pool", "Gym", "Parking", "Garage", "Shops / Retail", "Lift / Elevator",
+  "Backup Generator", "Security / Guards", "CCTV", "Mosque", "Community Park",
+  "Kids Play Area", "Clubhouse", "Rooftop Terrace", "Standby Power", "Water Filtration",
+];
+const AMENITY_SET = new Set(PROJECT_AMENITIES);
 
 /** Office-only gate for managing builder inventory (create project, price list, generate units). */
 async function requireInventoryManager() {
@@ -308,9 +317,15 @@ const wizardSchema = z.object({
   status: z.enum(PROJECT_STATUSES).optional(),
   city: z.string().optional(),
   area: z.string().optional(),
+  address: z.string().optional(),
+  latitude: z.number().nullable().optional(),
+  longitude: z.number().nullable().optional(),
+  totalFloors: z.number().int().min(0).nullable().optional(),
   description: z.string().optional(),
   isOffPlan: z.boolean().optional(),
   launchDate: z.string().optional(),
+  completionDate: z.string().optional(),
+  amenities: z.array(z.string()).optional(),
   unitTypes: z.array(z.object({
     key: z.string(),
     name: z.string().min(1),
@@ -370,9 +385,15 @@ export async function createProjectFull(input: ProjectWizardInput): Promise<Wiza
         status: d.status ?? "PLANNING",
         city: d.city || null,
         area: d.area || null,
+        address: d.address || null,
+        latitude: d.latitude ?? null,
+        longitude: d.longitude ?? null,
+        totalFloors: d.totalFloors ?? null,
         description: d.description || null,
         isOffPlan: !!d.isOffPlan,
         launchDate: d.launchDate ? new Date(d.launchDate) : null,
+        completionDate: d.completionDate ? new Date(d.completionDate) : null,
+        amenities: (d.amenities ?? []).filter((a) => AMENITY_SET.has(a)),
       },
       select: { id: true, name: true, city: true, area: true },
     });
@@ -428,4 +449,28 @@ export async function createProjectFull(input: ProjectWizardInput): Promise<Wiza
 
   revalidatePath("/projects");
   return { ok: true, projectId };
+}
+
+export type AiDescriptionResult = { ok: true; description: string } | { ok: false; reason: string };
+
+/** Wizard: draft a project description with AI from the details entered so far. */
+export async function aiProjectDescription(input: {
+  name: string;
+  status?: string;
+  city?: string;
+  area?: string;
+  address?: string;
+  totalFloors?: number | null;
+  isOffPlan?: boolean;
+  amenities?: string[];
+  unitTypes?: { name: string; basePrice?: number | null }[];
+  launchDate?: string;
+  completionDate?: string;
+}): Promise<AiDescriptionResult> {
+  const { user, allowed } = await requireInventoryManager();
+  if (!allowed) return { ok: false, reason: "Not allowed." };
+
+  const res = await generateProjectCopy({ companyId: user.companyId, ...input });
+  if (!res.ok) return { ok: false, reason: res.reason };
+  return { ok: true, description: res.description };
 }

@@ -19,6 +19,10 @@ interface AddressAutocompleteProps {
   defaultLat?: number | null;
   defaultLon?: number | null;
   placeholder?: string;
+  /** Fired when a suggestion is picked (so controlled forms can capture coords). */
+  onPick?: (s: { label: string; lat: number; lon: number }) => void;
+  /** Fired when the user edits the text, invalidating the captured coordinates. */
+  onClear?: () => void;
 }
 
 /** Build a readable one-line label from a Photon GeoJSON feature. */
@@ -53,6 +57,8 @@ export function AddressAutocomplete({
   defaultLat = null,
   defaultLon = null,
   placeholder = "Start typing an address…",
+  onPick,
+  onClear,
 }: AddressAutocompleteProps) {
   const [value, setValue] = useState(defaultValue);
   const [items, setItems] = useState<Suggestion[]>([]);
@@ -107,6 +113,7 @@ export function AddressAutocomplete({
   function onType(v: string) {
     setValue(v);
     setCoords(null); // coordinates no longer match the edited text
+    onClear?.();
   }
 
   function pick(s: Suggestion) {
@@ -115,6 +122,7 @@ export function AddressAutocomplete({
     setItems([]);
     setOpen(false);
     setActive(-1);
+    onPick?.({ label: s.label, lat: s.lat, lon: s.lon });
   }
 
   function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
