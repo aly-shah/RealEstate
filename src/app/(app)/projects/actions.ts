@@ -180,6 +180,66 @@ function refPrefix(name: string): string {
   return (alnum.slice(0, 3) || "PRJ");
 }
 
+interface UnitTypeForGen {
+  id: string;
+  name: string;
+  bedrooms: number | null;
+  bathrooms: number | null;
+  areaValue: number | null;
+  areaUnit: Prisma.PropertyCreateManyInput["areaUnit"];
+  basePrice: number;
+  floorRise: number;
+}
+
+/**
+ * Builds the Property rows for a tower of one unit type — floors floorFrom..floorTo,
+ * `unitsPerFloor` per floor, price = basePrice + (floor - 1) × floorRise. Shared by
+ * the per-tower generator and the create-project wizard.
+ */
+function buildUnitRows(opts: {
+  companyId: string;
+  projectId: string;
+  projectName: string;
+  city: string | null;
+  area: string | null;
+  unitType: UnitTypeForGen;
+  tower: string;
+  floorFrom: number;
+  floorTo: number;
+  unitsPerFloor: number;
+}): Prisma.PropertyCreateManyInput[] {
+  const prefix = refPrefix(opts.projectName);
+  const tower = opts.tower.trim().toUpperCase();
+  const { unitType } = opts;
+  const rows: Prisma.PropertyCreateManyInput[] = [];
+  for (let f = opts.floorFrom; f <= opts.floorTo; f++) {
+    for (let u = 1; u <= opts.unitsPerFloor; u++) {
+      const unitNumber = `${f}${String(u).padStart(2, "0")}`;
+      rows.push({
+        companyId: opts.companyId,
+        projectId: opts.projectId,
+        unitTypeId: unitType.id,
+        reference: `${prefix}-${tower}-${unitNumber}`,
+        title: `${unitType.name} · ${tower}-${unitNumber}`,
+        type: "APARTMENT",
+        listingType: "SALE",
+        status: "AVAILABLE",
+        tower,
+        floorNumber: f,
+        unitNumber,
+        bedrooms: unitType.bedrooms,
+        bathrooms: unitType.bathrooms,
+        coveredArea: unitType.areaValue,
+        areaUnit: unitType.areaUnit,
+        city: opts.city,
+        area: opts.area,
+        salePrice: new Prisma.Decimal(unitType.basePrice + Math.max(0, f - 1) * unitType.floorRise),
+      });
+    }
+  }
+  return rows;
+}
+
 /**
  * Bulk-generates AVAILABLE units for a tower: floors floorFrom..floorTo,
  * `unitsPerFloor` per floor, all of one unit type. Each unit's price is
@@ -207,37 +267,19 @@ export async function generateUnits(_prev: FormState, formData: FormData): Promi
   if (!project) return { error: "Project not found." };
   if (!unitType) return { error: "Unit type not found." };
 
-  const prefix = refPrefix(project.name);
   const tower = d.tower.trim().toUpperCase();
-  const base = Number(unitType.basePrice);
-  const rise = Number(unitType.floorRise);
-
-  const rows: Prisma.PropertyCreateManyInput[] = [];
-  for (let f = d.floorFrom; f <= d.floorTo; f++) {
-    for (let u = 1; u <= d.unitsPerFloor; u++) {
-      const unitNumber = `${f}${String(u).padStart(2, "0")}`;
-      rows.push({
-        companyId: user.companyId,
-        projectId: project.id,
-        unitTypeId: unitType.id,
-        reference: `${prefix}-${tower}-${unitNumber}`,
-        title: `${unitType.name} · ${tower}-${unitNumber}`,
-        type: "APARTMENT",
-        listingType: "SALE",
-        status: "AVAILABLE",
-        tower,
-        floorNumber: f,
-        unitNumber,
-        bedrooms: unitType.bedrooms ?? null,
-        bathrooms: unitType.bathrooms ?? null,
-        coveredArea: unitType.areaValue ?? null,
-        areaUnit: unitType.areaUnit,
-        city: project.city,
-        area: project.area,
-        salePrice: new Prisma.Decimal(base + Math.max(0, f - 1) * rise),
-      });
-    }
-  }
+  const rows = buildUnitRows({
+    companyId: user.companyId,
+    projectId: project.id,
+    projectName: project.name,
+    city: project.city,
+    area: project.area,
+    unitType: { ...unitType, basePrice: Number(unitType.basePrice), floorRise: Number(unitType.floorRise) },
+    tower,
+    floorFrom: d.floorFrom,
+    floorTo: d.floorTo,
+    unitsPerFloor: d.unitsPerFloor,
+  });
 
   // skipDuplicates: re-running an overlapping range won't error on the unique
   // (companyId, reference) — it just creates the genuinely-new units.
@@ -255,4 +297,135 @@ export async function generateUnits(_prev: FormState, formData: FormData): Promi
 
   revalidatePath(`/projects/${d.projectId}`);
   return count === total ? {} : { error: count === 0 ? "Those units already exist." : `Created ${count} new unit(s); the rest already existed.` };
+}
+
+/* ───────────────────────────── Create-project wizard ───────────────────────── */
+
+const AREA_UNITS = ["SQFT", "SQM", "SQYD", "MARLA", "KANAL"] as const;
+
+const wizardSchema = z.object({
+  name: z.string().min(2, "Project name is required"),
+  status: z.enum(PROJECT_STATUSES).optional(),
+  city: z.string().optional(),
+  area: z.string().optional(),
+  description: z.string().optional(),
+  isOffPlan: z.boolean().optional(),
+  launchDate: z.string().optional(),
+  unitTypes: z.array(z.object({
+    key: z.string(),
+    name: z.string().min(1),
+    bedrooms: z.number().int().min(0).nullable().optional(),
+    bathrooms: z.number().int().min(0).nullable().optional(),
+    areaValue: z.number().min(0).nullable().optional(),
+    areaUnit: z.enum(AREA_UNITS).optional(),
+    basePrice: z.number().min(0),
+    floorRise: z.number().min(0).optional(),
+  })).optional(),
+  batches: z.array(z.object({
+    tower: z.string().min(1),
+    floorFrom: z.number().int(),
+    floorTo: z.number().int(),
+    unitsPerFloor: z.number().int().min(1),
+    unitTypeKey: z.string().min(1),
+  })).optional(),
+});
+
+export type ProjectWizardInput = z.infer<typeof wizardSchema>;
+export type WizardResult = { ok: true; projectId: string } | { ok: false; error: string };
+
+const MAX_TOTAL_UNITS = 5000;
+
+/**
+ * Create a project, its unit-type price list, and (optionally) its starting
+ * inventory in one guided step — the create-project wizard. Everything happens
+ * in a single transaction: the project, the unit types (each tagged with a
+ * client `key`), and the generated units for each inventory batch (a batch
+ * references a type by `key`). Prices use floor-rise from the type.
+ */
+export async function createProjectFull(input: ProjectWizardInput): Promise<WizardResult> {
+  const { user, allowed } = await requireInventoryManager();
+  if (!allowed) return { ok: false, error: "Not allowed." };
+
+  const parsed = wizardSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Please check the form." };
+  const d = parsed.data;
+  const types = d.unitTypes ?? [];
+  const batches = d.batches ?? [];
+
+  // Validate batch references + total unit count before writing anything.
+  const typeByKey = new Map(types.map((t) => [t.key, t]));
+  let totalUnits = 0;
+  for (const b of batches) {
+    if (!typeByKey.has(b.unitTypeKey)) return { ok: false, error: "An inventory row references a unit type that was removed." };
+    if (b.floorTo < b.floorFrom) return { ok: false, error: `Tower ${b.tower}: top floor must be ≥ bottom floor.` };
+    totalUnits += (b.floorTo - b.floorFrom + 1) * b.unitsPerFloor;
+  }
+  if (totalUnits > MAX_TOTAL_UNITS) return { ok: false, error: `That would create ${totalUnits} units — keep it under ${MAX_TOTAL_UNITS}.` };
+
+  const projectId = await prisma.$transaction(async (tx) => {
+    const project = await tx.project.create({
+      data: {
+        companyId: user.companyId,
+        name: d.name,
+        status: d.status ?? "PLANNING",
+        city: d.city || null,
+        area: d.area || null,
+        description: d.description || null,
+        isOffPlan: !!d.isOffPlan,
+        launchDate: d.launchDate ? new Date(d.launchDate) : null,
+      },
+      select: { id: true, name: true, city: true, area: true },
+    });
+
+    // Create unit types, mapping each client key → created row.
+    const createdByKey = new Map<string, UnitTypeForGen>();
+    for (const t of types) {
+      const ut = await tx.unitType.create({
+        data: {
+          companyId: user.companyId,
+          projectId: project.id,
+          name: t.name,
+          bedrooms: t.bedrooms ?? null,
+          bathrooms: t.bathrooms ?? null,
+          areaValue: t.areaValue ?? null,
+          areaUnit: t.areaUnit ?? "SQFT",
+          basePrice: new Prisma.Decimal(t.basePrice),
+          floorRise: new Prisma.Decimal(t.floorRise ?? 0),
+        },
+        select: { id: true, name: true, bedrooms: true, bathrooms: true, areaValue: true, areaUnit: true, basePrice: true, floorRise: true },
+      });
+      createdByKey.set(t.key, { ...ut, basePrice: Number(ut.basePrice), floorRise: Number(ut.floorRise) });
+    }
+
+    // Generate inventory for each batch.
+    const rows: Prisma.PropertyCreateManyInput[] = [];
+    for (const b of batches) {
+      const unitType = createdByKey.get(b.unitTypeKey)!;
+      rows.push(...buildUnitRows({
+        companyId: user.companyId,
+        projectId: project.id,
+        projectName: project.name,
+        city: project.city,
+        area: project.area,
+        unitType,
+        tower: b.tower,
+        floorFrom: b.floorFrom,
+        floorTo: b.floorTo,
+        unitsPerFloor: b.unitsPerFloor,
+      }));
+    }
+    if (rows.length) await tx.property.createMany({ data: rows, skipDuplicates: true });
+
+    return project.id;
+  });
+
+  await logActivity({
+    companyId: user.companyId, userId: user.id, action: "project.created",
+    entityType: "PROPERTY", entityId: projectId,
+    summary: `Created project ${d.name} (${types.length} type(s), ${totalUnits} unit(s))`,
+    meta: { unitTypes: types.length, units: totalUnits },
+  });
+
+  revalidatePath("/projects");
+  return { ok: true, projectId };
 }

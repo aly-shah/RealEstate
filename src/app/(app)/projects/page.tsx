@@ -6,7 +6,7 @@ import { money, toNumber, humanize } from "@/lib/format";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { NewProjectButton } from "./NewProjectButton";
+import { ProjectWizard } from "./ProjectWizard";
 
 export const PROJECT_STATUS_TONE: Record<string, "ok" | "accent" | "warn" | "neutral" | "danger"> = {
   PLANNING: "neutral",
@@ -57,7 +57,7 @@ export default async function ProjectsPage() {
         eyebrow="Inventory"
         title="Projects"
         subtitle="Your developments and their unit inventory."
-        action={canManage ? <NewProjectButton /> : null}
+        action={canManage ? <ProjectWizard /> : null}
       />
 
       {projects.length === 0 ? (
