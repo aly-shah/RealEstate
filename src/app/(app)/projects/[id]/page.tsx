@@ -12,6 +12,9 @@ import { Table, Td } from "@/components/ui/Table";
 import { StatusBadge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ProjectManage } from "./ProjectManage";
+import { EditProject } from "./EditProject";
+
+const isoDate = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : "");
 
 const UNIT_CAP = 300;
 
@@ -69,7 +72,19 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
         eyebrow="Project"
         title={project.name}
         subtitle={[project.area, project.city].filter(Boolean).join(", ") || undefined}
-        action={canManage ? <ProjectManage projectId={project.id} status={project.status} unitTypes={unitTypes.map((t) => ({ id: t.id, name: t.name }))} hasTypes={unitTypes.length > 0} dealers={dealers} towers={towers} /> : null}
+        action={canManage ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <EditProject project={{
+              id: project.id, name: project.name, status: project.status,
+              city: project.city ?? "", area: project.area ?? "", address: project.address ?? "",
+              latitude: project.latitude, longitude: project.longitude,
+              totalFloors: project.totalFloors != null ? String(project.totalFloors) : "",
+              isOffPlan: project.isOffPlan, launchDate: isoDate(project.launchDate), completionDate: isoDate(project.completionDate),
+              amenities: project.amenities, description: project.description ?? "",
+            }} />
+            <ProjectManage projectId={project.id} status={project.status} unitTypes={unitTypes.map((t) => ({ id: t.id, name: t.name }))} hasTypes={unitTypes.length > 0} dealers={dealers} towers={towers} />
+          </div>
+        ) : null}
       />
 
       <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">

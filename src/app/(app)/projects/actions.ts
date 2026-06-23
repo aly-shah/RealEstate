@@ -71,6 +71,65 @@ export async function createProject(_prev: FormState, formData: FormData): Promi
 
 const PROJECT_STATUSES = ["PLANNING", "PRE_LAUNCH", "SELLING", "SOLD_OUT", "COMPLETED", "ON_HOLD"] as const;
 
+const updateProjectSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(2, "Project name is required"),
+  status: z.enum(PROJECT_STATUSES).optional(),
+  city: z.string().optional(),
+  area: z.string().optional(),
+  address: z.string().optional(),
+  latitude: z.number().nullable().optional(),
+  longitude: z.number().nullable().optional(),
+  totalFloors: z.number().int().min(0).nullable().optional(),
+  description: z.string().optional(),
+  isOffPlan: z.boolean().optional(),
+  launchDate: z.string().optional(),
+  completionDate: z.string().optional(),
+  amenities: z.array(z.string()).optional(),
+});
+
+export type UpdateProjectInput = z.infer<typeof updateProjectSchema>;
+
+/** Edit a project's core attributes — details, map location, amenities, dates,
+ *  description. Office-only; tenant-scoped. Unit types / inventory are edited via
+ *  their own controls on the project page. */
+export async function updateProject(input: UpdateProjectInput): Promise<{ ok: true } | { ok: false; error: string }> {
+  const { user, allowed } = await requireInventoryManager();
+  if (!allowed) return { ok: false, error: "Not allowed." };
+
+  const parsed = updateProjectSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Please check the form." };
+  const d = parsed.data;
+
+  const { count } = await prisma.project.updateMany({
+    where: { id: d.id, companyId: user.companyId },
+    data: {
+      name: d.name,
+      status: d.status,
+      city: d.city || null,
+      area: d.area || null,
+      address: d.address || null,
+      latitude: d.latitude ?? null,
+      longitude: d.longitude ?? null,
+      totalFloors: d.totalFloors ?? null,
+      description: d.description || null,
+      isOffPlan: !!d.isOffPlan,
+      launchDate: d.launchDate ? new Date(d.launchDate) : null,
+      completionDate: d.completionDate ? new Date(d.completionDate) : null,
+      amenities: (d.amenities ?? []).filter((a) => AMENITY_SET.has(a)),
+    },
+  });
+  if (count === 0) return { ok: false, error: "Project not found." };
+
+  await logActivity({
+    companyId: user.companyId, userId: user.id, action: "project.updated",
+    entityType: "PROPERTY", entityId: d.id, summary: `Updated project ${d.name}`,
+  });
+  revalidatePath("/projects");
+  revalidatePath(`/projects/${d.id}`);
+  return { ok: true };
+}
+
 export async function updateProjectStatus(projectId: string, status: string): Promise<FormState> {
   const { user, allowed } = await requireInventoryManager();
   if (!allowed) return { error: "Not allowed." };
