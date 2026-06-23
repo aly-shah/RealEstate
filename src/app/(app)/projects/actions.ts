@@ -22,6 +22,10 @@ const PROJECT_AMENITIES = [
 ];
 const AMENITY_SET = new Set(PROJECT_AMENITIES);
 
+// Floors / beds / baths / units are conceptually integers, but a number input
+// can hand us a stray decimal — round rather than hard-fail the whole form.
+const roundInt = (n: number) => Math.round(n);
+
 /** Office-only gate for managing builder inventory (create project, price list, generate units). */
 async function requireInventoryManager() {
   const user = await requireCompanyUser();
@@ -82,8 +86,8 @@ const updateProjectSchema = z.object({
   address: z.string().optional(),
   latitude: z.number().nullable().optional(),
   longitude: z.number().nullable().optional(),
-  totalFloors: z.number().int().min(0).nullable().optional(),
-  parkingFloors: z.number().int().min(0).nullable().optional(),
+  totalFloors: z.number().min(0).transform(roundInt).nullable().optional(),
+  parkingFloors: z.number().min(0).transform(roundInt).nullable().optional(),
   description: z.string().optional(),
   isOffPlan: z.boolean().optional(),
   launchDate: z.string().optional(),
@@ -101,7 +105,10 @@ export async function updateProject(input: UpdateProjectInput): Promise<{ ok: tr
   if (!allowed) return { ok: false, error: "Not allowed." };
 
   const parsed = updateProjectSchema.safeParse(input);
-  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Please check the form." };
+  if (!parsed.success) {
+    const i = parsed.error.issues[0];
+    return { ok: false, error: i ? `${i.path.join(".") || "Form"}: ${i.message}` : "Please check the form." };
+  }
   const d = parsed.data;
 
   const { count } = await prisma.project.updateMany({
@@ -152,8 +159,8 @@ export async function updateProjectStatus(projectId: string, status: string): Pr
 const unitTypeSchema = z.object({
   projectId: z.string().min(1),
   name: z.string().min(1, "Type name is required"),
-  bedrooms: z.coerce.number().int().min(0).optional(),
-  bathrooms: z.coerce.number().int().min(0).optional(),
+  bedrooms: z.coerce.number().min(0).transform(roundInt).optional(),
+  bathrooms: z.coerce.number().min(0).transform(roundInt).optional(),
   areaValue: z.coerce.number().min(0).optional(),
   areaUnit: z.enum(["SQFT", "SQM", "SQYD", "MARLA", "KANAL"]).optional(),
   basePrice: z.coerce.number().min(0, "Base price must be ≥ 0"),
@@ -241,9 +248,9 @@ const generateSchema = z.object({
   projectId: z.string().min(1),
   unitTypeId: z.string().min(1, "Pick a unit type"),
   tower: z.string().min(1, "Tower/block is required"),
-  floorFrom: z.coerce.number().int(),
-  floorTo: z.coerce.number().int(),
-  unitsPerFloor: z.coerce.number().int().min(1, "At least 1 unit per floor"),
+  floorFrom: z.coerce.number().transform(roundInt),
+  floorTo: z.coerce.number().transform(roundInt),
+  unitsPerFloor: z.coerce.number().min(1, "At least 1 unit per floor").transform(roundInt),
 });
 
 /** Sanitise a project name into a short reference prefix (e.g. "Skyline Towers" → "SKY"). */
@@ -384,8 +391,8 @@ const wizardSchema = z.object({
   address: z.string().optional(),
   latitude: z.number().nullable().optional(),
   longitude: z.number().nullable().optional(),
-  totalFloors: z.number().int().min(0).nullable().optional(),
-  parkingFloors: z.number().int().min(0).nullable().optional(),
+  totalFloors: z.number().min(0).transform(roundInt).nullable().optional(),
+  parkingFloors: z.number().min(0).transform(roundInt).nullable().optional(),
   description: z.string().optional(),
   isOffPlan: z.boolean().optional(),
   launchDate: z.string().optional(),
@@ -394,25 +401,25 @@ const wizardSchema = z.object({
   unitTypes: z.array(z.object({
     key: z.string(),
     name: z.string().min(1),
-    bedrooms: z.number().int().min(0).nullable().optional(),
-    bathrooms: z.number().int().min(0).nullable().optional(),
+    bedrooms: z.number().min(0).transform(roundInt).nullable().optional(),
+    bathrooms: z.number().min(0).transform(roundInt).nullable().optional(),
     areaValue: z.number().min(0).nullable().optional(),
     areaUnit: z.enum(AREA_UNITS).optional(),
     basePrice: z.number().min(0),
     floorRise: z.number().min(0).optional(),
     // Placement: where this layout sits (drives generation when all are set).
     tower: z.string().optional(),
-    floorFrom: z.number().int().nullable().optional(),
-    floorTo: z.number().int().nullable().optional(),
-    unitsPerFloor: z.number().int().min(1).nullable().optional(),
+    floorFrom: z.number().transform(roundInt).nullable().optional(),
+    floorTo: z.number().transform(roundInt).nullable().optional(),
+    unitsPerFloor: z.number().min(1).transform(roundInt).nullable().optional(),
   })).optional(),
   // Legacy generic batches (still accepted); the wizard now drives generation
   // from per-type placement above.
   batches: z.array(z.object({
     tower: z.string().min(1),
-    floorFrom: z.number().int(),
-    floorTo: z.number().int(),
-    unitsPerFloor: z.number().int().min(1),
+    floorFrom: z.number().transform(roundInt),
+    floorTo: z.number().transform(roundInt),
+    unitsPerFloor: z.number().min(1).transform(roundInt),
     unitTypeKey: z.string().min(1),
   })).optional(),
 });
@@ -434,7 +441,10 @@ export async function createProjectFull(input: ProjectWizardInput): Promise<Wiza
   if (!allowed) return { ok: false, error: "Not allowed." };
 
   const parsed = wizardSchema.safeParse(input);
-  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Please check the form." };
+  if (!parsed.success) {
+    const i = parsed.error.issues[0];
+    return { ok: false, error: i ? `${i.path.join(".") || "Form"}: ${i.message}` : "Please check the form." };
+  }
   const d = parsed.data;
   const types = d.unitTypes ?? [];
   const batches = d.batches ?? [];
