@@ -12,6 +12,75 @@ import { setFlash } from "@/lib/flash";
 import { runOnce } from "@/lib/idempotency";
 import { casUpdateGuarded } from "@/lib/concurrency";
 import { invalidateCompanyMetrics } from "@/lib/metrics";
+import { humanize } from "@/lib/format";
+
+export interface OutstandingItem { id: string; label: string; amount: number; dueDate: string | null; status: string }
+
+/** A deal's outstanding scheduled payments (for the dynamic record-payment form). */
+export async function dealOutstanding(dealId: string): Promise<OutstandingItem[]> {
+  const user = await requireCompanyUser();
+  if (!can(user.role, "managePayments") || !dealId) return [];
+  const rows = await prisma.payment.findMany({
+    where: { companyId: user.companyId, dealId, status: { in: ["PENDING", "PARTIAL", "OVERDUE"] } },
+    orderBy: [{ dueDate: "asc" }, { createdAt: "asc" }],
+    select: { id: true, type: true, notes: true, amount: true, dueDate: true, status: true },
+  });
+  return rows.map((r) => ({
+    id: r.id,
+    label: r.notes || humanize(r.type),
+    amount: Number(r.amount),
+    dueDate: r.dueDate ? r.dueDate.toISOString() : null,
+    status: r.status,
+  }));
+}
+
+/** Mark a set of scheduled installments PAID in one go (optimistic-locked each). */
+export async function payScheduled(input: {
+  paymentIds: string[];
+  paidAt?: string;
+  method?: string;
+  receiptNo?: string;
+}): Promise<{ ok: boolean; count?: number; error?: string }> {
+  const user = await requireCompanyUser();
+  if (!can(user.role, "managePayments")) return { ok: false, error: "Not allowed." };
+  const ids = [...new Set((input.paymentIds || []).filter(Boolean))];
+  if (!ids.length) return { ok: false, error: "Select at least one installment." };
+
+  const when = input.paidAt ? new Date(input.paidAt) : new Date();
+  const method = input.method?.trim() || null;
+  const receiptNo = input.receiptNo?.trim() || null;
+
+  let count = 0;
+  const invoiceIds = new Set<string>();
+  const dealIds = new Set<string>();
+  for (const id of ids) {
+    const pay = await prisma.payment.findFirst({ where: { id, companyId: user.companyId }, select: { invoiceId: true, dealId: true } });
+    if (!pay) continue;
+    // CAS: only a not-yet-PAID row flips — two concurrent clicks can't double-pay.
+    const moved = await casUpdateGuarded(
+      prisma.payment,
+      { id, companyId: user.companyId, status: { not: "PAID" } },
+      { status: "PAID", paidAt: when, method, receiptNo },
+    );
+    if (moved) {
+      count++;
+      if (pay.invoiceId) invoiceIds.add(pay.invoiceId);
+      if (pay.dealId) dealIds.add(pay.dealId);
+    }
+  }
+  if (count === 0) return { ok: false, error: "Those installments were already paid." };
+
+  for (const inv of invoiceIds) await recomputeInvoiceStatus(inv);
+  await logActivity({
+    companyId: user.companyId, userId: user.id, action: "payment.paid",
+    entityType: "DEAL", entityId: [...dealIds][0] ?? null,
+    summary: `Recorded ${count} installment payment(s)`, meta: { count },
+  });
+  invalidateCompanyMetrics(user.companyId);
+  revalidatePath("/payments");
+  for (const did of dealIds) revalidatePath(`/deals/${did}`);
+  return { ok: true, count };
+}
 
 const paymentSchema = z.object({
   dealId: z.string().optional(),
