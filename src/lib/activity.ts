@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@prisma/client";
 import { auth } from "@/auth";
 import { clientIp, userAgent } from "@/lib/request-meta";
+import { publish } from "@/lib/realtime";
 
 interface LogInput {
   companyId: string;
@@ -63,7 +64,7 @@ export async function notify(input: {
   body?: string;
   link?: string;
 }): Promise<void> {
-  await prisma.notification.create({
+  const row = await prisma.notification.create({
     data: {
       companyId: input.companyId,
       userId: input.userId,
@@ -72,5 +73,15 @@ export async function notify(input: {
       body: input.body,
       link: input.link,
     },
+    select: { id: true },
+  });
+  // Push to the user's open tabs in real time (best-effort; never throws).
+  await publish({
+    userId: input.userId,
+    companyId: input.companyId,
+    id: row.id,
+    type: String(input.type),
+    title: input.title,
+    link: input.link ?? null,
   });
 }

@@ -4,7 +4,7 @@ const nextConfig: NextConfig = {
   // Baileys is a Node-only WhatsApp library with dynamic requires + optional
   // native deps — keep it out of the bundler so it loads from node_modules at
   // runtime (server only).
-  serverExternalPackages: ["@whiskeysockets/baileys"],
+  serverExternalPackages: ["@whiskeysockets/baileys", "pg"],
   // The service worker must never be cached by the browser/CDN, or clients get
   // stuck on a stale SW and miss updates.
   async headers() {
