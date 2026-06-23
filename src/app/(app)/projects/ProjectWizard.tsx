@@ -22,6 +22,9 @@ interface TypeRow {
   basePrice: string; floorRise: string; tower: string; floorFrom: string; floorTo: string; unitsPerFloor: string;
 }
 
+// Small field label used inside the dense unit-type rows.
+const lbl = "mb-0.5 block text-[10px] font-medium uppercase tracking-wide text-muted";
+
 const newKey = () => Math.random().toString(36).slice(2, 10);
 const num = (s: string) => (s.trim() === "" ? null : Number(s));
 const hasPlacement = (t: TypeRow) => t.floorFrom.trim() !== "" && t.floorTo.trim() !== "" && Number(t.unitsPerFloor) >= 1;
@@ -235,26 +238,24 @@ export function ProjectWizard() {
                   <span className="text-xs font-semibold text-muted">Type {i + 1}</span>
                   <button type="button" onClick={() => setTypes((r) => r.filter((_, j) => j !== i))} className="text-xs text-danger">Remove</button>
                 </div>
-                {/* Size + price */}
-                <p className="mb-1 text-[11px] font-medium uppercase tracking-wide text-muted">Layout & price</p>
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                  <input className="field text-ink" placeholder="Name (2-Bed)" value={t.name} onChange={(e) => setType(i, { name: e.target.value })} />
-                  <input className="field text-ink" type="number" min="0" placeholder="Beds" value={t.bedrooms} onChange={(e) => setType(i, { bedrooms: e.target.value })} />
-                  <input className="field text-ink" type="number" min="0" placeholder="Baths" value={t.bathrooms} onChange={(e) => setType(i, { bathrooms: e.target.value })} />
-                  <div className="flex gap-1">
-                    <input className="field text-ink" type="number" min="0" placeholder="Size" value={t.areaValue} onChange={(e) => setType(i, { areaValue: e.target.value })} />
-                    <select className="field !w-20 text-ink" value={t.areaUnit} onChange={(e) => setType(i, { areaUnit: e.target.value })}>{AREA_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}</select>
-                  </div>
-                  <input className="field text-ink" type="number" min="0" placeholder="Base price (PKR)" value={t.basePrice} onChange={(e) => setType(i, { basePrice: e.target.value })} />
-                  <input className="field text-ink" type="number" min="0" placeholder="Floor rise / floor" value={t.floorRise} onChange={(e) => setType(i, { floorRise: e.target.value })} />
+                {/* Layout & price */}
+                <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-muted">Layout & price</p>
+                <div className="grid grid-cols-2 gap-x-2 gap-y-2.5 sm:grid-cols-6">
+                  <div className="sm:col-span-2"><label className={lbl}>Name</label><input className="field text-ink" placeholder="2-Bed" value={t.name} onChange={(e) => setType(i, { name: e.target.value })} /></div>
+                  <div><label className={lbl}>Beds</label><input className="field text-ink" type="number" min="0" value={t.bedrooms} onChange={(e) => setType(i, { bedrooms: e.target.value })} /></div>
+                  <div><label className={lbl}>Baths</label><input className="field text-ink" type="number" min="0" value={t.bathrooms} onChange={(e) => setType(i, { bathrooms: e.target.value })} /></div>
+                  <div><label className={lbl}>Size</label><input className="field text-ink" type="number" min="0" placeholder="1100" value={t.areaValue} onChange={(e) => setType(i, { areaValue: e.target.value })} /></div>
+                  <div><label className={lbl}>Unit</label><select className="field text-ink" value={t.areaUnit} onChange={(e) => setType(i, { areaUnit: e.target.value })}>{AREA_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}</select></div>
+                  <div className="sm:col-span-3"><label className={lbl}>Base price (PKR)</label><input className="field text-ink" type="number" min="0" placeholder="20000000" value={t.basePrice} onChange={(e) => setType(i, { basePrice: e.target.value })} /></div>
+                  <div className="sm:col-span-3"><label className={lbl}>Floor rise / floor</label><input className="field text-ink" type="number" min="0" placeholder="0" value={t.floorRise} onChange={(e) => setType(i, { floorRise: e.target.value })} /></div>
                 </div>
                 {/* Placement */}
-                <p className="mb-1 mt-3 text-[11px] font-medium uppercase tracking-wide text-muted">Placement (which floors · how many per floor)</p>
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                  <input className="field text-ink" placeholder="Tower / block (A)" value={t.tower} onChange={(e) => setType(i, { tower: e.target.value })} />
-                  <input className="field text-ink" type="number" placeholder="Floor from" value={t.floorFrom} onChange={(e) => setType(i, { floorFrom: e.target.value })} />
-                  <input className="field text-ink" type="number" placeholder="Floor to" value={t.floorTo} onChange={(e) => setType(i, { floorTo: e.target.value })} />
-                  <input className="field text-ink" type="number" min="1" placeholder="Units / floor" value={t.unitsPerFloor} onChange={(e) => setType(i, { unitsPerFloor: e.target.value })} />
+                <p className="mb-1.5 mt-3 text-[11px] font-medium uppercase tracking-wide text-muted">Placement (which floors · how many per floor)</p>
+                <div className="grid grid-cols-2 gap-x-2 gap-y-2.5 sm:grid-cols-4">
+                  <div><label className={lbl}>Tower / block</label><input className="field text-ink" placeholder="A" value={t.tower} onChange={(e) => setType(i, { tower: e.target.value })} /></div>
+                  <div><label className={lbl}>Floor from</label><input className="field text-ink" type="number" value={t.floorFrom} onChange={(e) => setType(i, { floorFrom: e.target.value })} /></div>
+                  <div><label className={lbl}>Floor to</label><input className="field text-ink" type="number" value={t.floorTo} onChange={(e) => setType(i, { floorTo: e.target.value })} /></div>
+                  <div><label className={lbl}>Units / floor</label><input className="field text-ink" type="number" min="1" value={t.unitsPerFloor} onChange={(e) => setType(i, { unitsPerFloor: e.target.value })} /></div>
                 </div>
                 {hasPlacement(t) && Number(t.floorTo) >= Number(t.floorFrom) && (
                   <p className="mt-1.5 text-xs text-accent">{(Number(t.floorTo) - Number(t.floorFrom) + 1) * Number(t.unitsPerFloor)} units · floors {t.floorFrom}–{t.floorTo} · {t.unitsPerFloor}/floor</p>
