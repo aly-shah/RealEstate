@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState, useState, useTransition } from "react";
-import { addUnitType, generateUnits, updateProjectStatus, type FormState } from "../actions";
+import { addUnitType, allocateTower, generateUnits, updateProjectStatus, type FormState } from "../actions";
 import { humanize } from "@/lib/format";
 import { Drawer } from "@/components/ui/Drawer";
 
@@ -13,12 +13,21 @@ interface Props {
   status: string;
   unitTypes: { id: string; name: string }[];
   hasTypes: boolean;
+  dealers: { id: string; name: string }[];
+  towers: string[];
 }
 
-export function ProjectManage({ projectId, status, unitTypes, hasTypes }: Props) {
+export function ProjectManage({ projectId, status, unitTypes, hasTypes, dealers, towers }: Props) {
   const [typeOpen, setTypeOpen] = useState(false);
   const [genOpen, setGenOpen] = useState(false);
+  const [allocOpen, setAllocOpen] = useState(false);
   const [statusPending, startStatus] = useTransition();
+
+  const [allocState, allocAction, allocPending] = useActionState<FormState, FormData>(async (p, fd) => {
+    const r = await allocateTower(p, fd);
+    if (!r.error) setAllocOpen(false);
+    return r;
+  }, {});
 
   // Both actions return {} on success; close the drawer when there's no error.
   const [typeState, typeAction, typePending] = useActionState<FormState, FormData>(async (p, fd) => {
@@ -44,6 +53,7 @@ export function ProjectManage({ projectId, status, unitTypes, hasTypes }: Props)
         {STATUSES.map((s) => <option key={s} value={s}>{humanize(s)}</option>)}
       </select>
       <button onClick={() => setTypeOpen(true)} className="btn-ghost">+ Unit type</button>
+      <button onClick={() => setAllocOpen(true)} className="btn-ghost" disabled={towers.length === 0 || dealers.length === 0} title={dealers.length === 0 ? "Add a dealer first" : towers.length === 0 ? "Generate units first" : ""}>Allocate</button>
       <button onClick={() => setGenOpen(true)} className="btn-accent" disabled={!hasTypes} title={hasTypes ? "" : "Add a unit type first"}>Generate units</button>
 
       {/* Add unit type */}
@@ -110,6 +120,34 @@ export function ProjectManage({ projectId, status, unitTypes, hasTypes }: Props)
           <div className="flex justify-end gap-2 pt-1">
             <button type="button" onClick={() => setGenOpen(false)} className="btn-ghost">Cancel</button>
             <button type="submit" disabled={genPending} className="btn-accent">{genPending ? "Generating…" : "Generate"}</button>
+          </div>
+        </form>
+      </Drawer>
+
+      {/* Allocate a tower to a dealer */}
+      <Drawer open={allocOpen} onClose={() => setAllocOpen(false)} title="Allocate tower to a dealer" description="Assign a tower's available units to a dealer to sell." width="md">
+        <form action={allocAction} className="space-y-3">
+          <input type="hidden" name="projectId" value={projectId} />
+          {allocState.error && <p className="rounded-lg bg-warn-bg px-3 py-2 text-xs text-warn">{allocState.error}</p>}
+          <div>
+            <label className="label" htmlFor="a-tower">Tower</label>
+            <select id="a-tower" name="tower" className="field" required defaultValue="">
+              <option value="" disabled>— Pick a tower —</option>
+              {towers.map((t) => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="label" htmlFor="a-dealer">Dealer</label>
+            <select id="a-dealer" name="dealerId" className="field" required defaultValue="">
+              <option value="" disabled>— Pick a dealer —</option>
+              {dealers.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+              <option value="__unassign__">— Clear allocation —</option>
+            </select>
+          </div>
+          <p className="text-xs text-muted">Only AVAILABLE units are (re)assigned — reserved/sold units keep their dealer.</p>
+          <div className="flex justify-end gap-2 pt-1">
+            <button type="button" onClick={() => setAllocOpen(false)} className="btn-ghost">Cancel</button>
+            <button type="submit" disabled={allocPending} className="btn-accent">{allocPending ? "Allocating…" : "Allocate"}</button>
           </div>
         </form>
       </Drawer>

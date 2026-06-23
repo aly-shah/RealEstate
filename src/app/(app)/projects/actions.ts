@@ -120,6 +120,49 @@ export async function addUnitType(_prev: FormState, formData: FormData): Promise
   return {};
 }
 
+const allocateSchema = z.object({
+  projectId: z.string().min(1),
+  tower: z.string().min(1, "Tower is required"),
+  dealerId: z.string().min(1, "Pick a dealer"),
+});
+
+/**
+ * Channel allocation: assign every AVAILABLE unit in a tower to a dealer (sets
+ * Property.dealerId), so it shows up in that dealer's "inventory to sell". A
+ * dealerId of "__unassign__" clears the allocation. Office-only.
+ */
+export async function allocateTower(_prev: FormState, formData: FormData): Promise<FormState> {
+  const { user, allowed } = await requireInventoryManager();
+  if (!allowed) return { error: "Not allowed." };
+
+  const parsed = allocateSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { error: "Please fix the errors below.", fieldErrors: parsed.error.flatten().fieldErrors };
+  const d = parsed.data;
+  const tower = d.tower.trim().toUpperCase();
+  const unassign = d.dealerId === "__unassign__";
+
+  if (!unassign) {
+    const dealer = await prisma.dealer.findFirst({ where: { id: d.dealerId, companyId: user.companyId }, select: { id: true } });
+    if (!dealer) return { error: "Dealer not found." };
+  }
+
+  // Only AVAILABLE units — never reassign one that's reserved/sold under a booking.
+  const { count } = await prisma.property.updateMany({
+    where: { companyId: user.companyId, projectId: d.projectId, tower, status: "AVAILABLE" },
+    data: { dealerId: unassign ? null : d.dealerId },
+  });
+
+  await logActivity({
+    companyId: user.companyId, userId: user.id, action: "project.allocated",
+    entityType: "PROPERTY", entityId: d.projectId,
+    summary: unassign ? `Cleared dealer on ${count} unit(s) in tower ${tower}` : `Allocated ${count} unit(s) in tower ${tower} to a dealer`,
+    meta: { tower, dealerId: unassign ? null : d.dealerId, count },
+  });
+
+  revalidatePath(`/projects/${d.projectId}`);
+  return count === 0 ? { error: `No AVAILABLE units in tower ${tower} to allocate.` } : {};
+}
+
 const MAX_UNITS_PER_RUN = 2000;
 
 const generateSchema = z.object({

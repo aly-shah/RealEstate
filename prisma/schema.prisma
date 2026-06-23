@@ -432,6 +432,7 @@ model Company {
   properties          Property[]
   projects            Project[]
   unitTypes           UnitType[]
+  bookings            Booking[]
   dealers             Dealer[]
   clients             Client[]
   leads               Lead[]
@@ -686,6 +687,7 @@ model Property {
   documents Document[]
   events    CalendarEvent[]
   views     PropertyView[]
+  bookings  Booking[]
 
   @@unique([companyId, reference])
   @@index([companyId])
@@ -700,6 +702,49 @@ model Property {
   // benefits from an index on the raw column (Postgres still seq-scans for
   // ILIKE but the equality lookup hits this).
   @@index([companyId, city])
+}
+
+// Channel-sales booking: a dealer (or agent) reserves a unit for a buyer; the
+// builder/office approves or rejects. Approval marks the unit SOLD; rejection
+// releases it back to AVAILABLE. Kept separate from Deal so the dealer-initiated
+// request and the builder's approval are an explicit, auditable step. dealerId /
+// clientId / bookedById are scalar FKs (no relation) — booking is a transient
+// workflow record; the company + property relations carry the tenant cascade.
+enum BookingStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+model Booking {
+  id           String        @id @default(cuid())
+  companyId    String
+  company      Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  propertyId   String
+  property     Property      @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  dealerId     String?
+  clientId     String?
+  // Buyer captured inline when there's no Client record yet.
+  clientName   String?
+  clientPhone  String?
+  bookedById   String?
+  status       BookingStatus @default(PENDING)
+  // Agreed sale price (may differ from the unit's list price after a discount).
+  price        Decimal       @db.Decimal(14, 2)
+  discount     Decimal?      @db.Decimal(14, 2)
+  notes        String?
+  reviewedById String?
+  reviewedAt   DateTime?
+  reviewNote   String?
+  // Optimistic-lock counter so two approvers can't both action one booking.
+  version      Int           @default(0)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @default(now()) @updatedAt
+
+  @@index([companyId, status])
+  @@index([propertyId])
+  @@index([dealerId])
 }
 
 model PropertyMedia {

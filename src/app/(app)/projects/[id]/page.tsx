@@ -25,7 +25,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
   });
   if (!project) notFound();
 
-  const [unitTypes, statusAgg, units] = await Promise.all([
+  const [unitTypes, statusAgg, units, dealers, towerRows] = await Promise.all([
     prisma.unitType.findMany({
       where: { companyId: user.companyId, projectId: id },
       orderBy: { basePrice: "asc" },
@@ -41,9 +41,13 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
       where: { companyId: user.companyId, projectId: id },
       orderBy: [{ tower: "asc" }, { floorNumber: "desc" }, { unitNumber: "asc" }],
       take: UNIT_CAP,
-      select: { id: true, reference: true, tower: true, floorNumber: true, unitNumber: true, status: true, salePrice: true, unitType: { select: { name: true } } },
+      select: { id: true, reference: true, tower: true, floorNumber: true, unitNumber: true, status: true, salePrice: true, unitType: { select: { name: true } }, dealer: { select: { name: true } } },
     }),
+    canManage ? prisma.dealer.findMany({ where: { companyId: user.companyId, status: "ACTIVE" }, orderBy: { name: "asc" }, select: { id: true, name: true } }) : Promise.resolve([]),
+    // Distinct towers in this project — drives the allocation picker.
+    prisma.property.findMany({ where: { companyId: user.companyId, projectId: id, tower: { not: null } }, distinct: ["tower"], select: { tower: true }, orderBy: { tower: "asc" } }),
   ]);
+  const towers = towerRows.map((t) => t.tower!).filter(Boolean);
 
   let total = 0, available = 0, reserved = 0, sold = 0, gross = 0, soldValue = 0;
   for (const g of statusAgg) {
@@ -61,7 +65,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
         eyebrow="Project"
         title={project.name}
         subtitle={[project.area, project.city].filter(Boolean).join(", ") || undefined}
-        action={canManage ? <ProjectManage projectId={project.id} status={project.status} unitTypes={unitTypes.map((t) => ({ id: t.id, name: t.name }))} hasTypes={unitTypes.length > 0} /> : null}
+        action={canManage ? <ProjectManage projectId={project.id} status={project.status} unitTypes={unitTypes.map((t) => ({ id: t.id, name: t.name }))} hasTypes={unitTypes.length > 0} dealers={dealers} towers={towers} /> : null}
       />
 
       <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
@@ -97,13 +101,14 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
         {units.length === 0 ? (
           <EmptyState title="No units yet" hint={canManage ? "Use “Generate units” to create the inventory." : "No units have been generated yet."} />
         ) : (
-          <Table head={["Unit", "Tower", "Floor", "Type", "Price", "Status"]}>
+          <Table head={["Unit", "Tower", "Floor", "Type", "Dealer", "Price", "Status"]}>
             {units.map((u) => (
               <tr key={u.id} className="hover:bg-line-soft">
                 <Td><Link href={`/properties/${u.id}`} className="font-semibold text-ink hover:text-accent">{u.reference}</Link></Td>
                 <Td className="text-muted">{u.tower ?? "—"}</Td>
                 <Td className="text-muted">{u.floorNumber ?? "—"}</Td>
                 <Td className="text-muted">{u.unitType?.name ?? "—"}</Td>
+                <Td className="text-muted">{u.dealer?.name ?? "—"}</Td>
                 <Td className="font-medium">{u.salePrice != null ? money(u.salePrice) : "—"}</Td>
                 <Td><StatusBadge status={u.status} /></Td>
               </tr>
