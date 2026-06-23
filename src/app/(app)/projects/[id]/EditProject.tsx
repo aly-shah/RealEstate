@@ -25,6 +25,7 @@ export interface EditProjectData {
   latitude: number | null;
   longitude: number | null;
   totalFloors: string;
+  parkingFloors: string;
   isOffPlan: boolean;
   launchDate: string;
   completionDate: string;
@@ -45,6 +46,7 @@ export function EditProject({ project }: { project: EditProjectData }) {
   const [status, setStatus] = useState(project.status);
   const [isOffPlan, setIsOffPlan] = useState(project.isOffPlan);
   const [totalFloors, setTotalFloors] = useState(project.totalFloors);
+  const [parkingFloors, setParkingFloors] = useState(project.parkingFloors);
   const [launchDate, setLaunchDate] = useState(project.launchDate);
   const [completionDate, setCompletionDate] = useState(project.completionDate);
   const [address, setAddress] = useState(project.address);
@@ -79,7 +81,7 @@ export function EditProject({ project }: { project: EditProjectData }) {
       const r = await updateProject({
         id: project.id, name: name.trim(), status: status as "PLANNING",
         city: city.trim() || undefined, area: area.trim() || undefined, address: address.trim() || undefined,
-        latitude: coords?.lat ?? null, longitude: coords?.lng ?? null, totalFloors: num(totalFloors),
+        latitude: coords?.lat ?? null, longitude: coords?.lng ?? null, totalFloors: num(totalFloors), parkingFloors: num(parkingFloors),
         description: description.trim() || undefined, isOffPlan,
         launchDate: launchDate || undefined, completionDate: completionDate || undefined, amenities,
       });
@@ -99,9 +101,10 @@ export function EditProject({ project }: { project: EditProjectData }) {
           {/* Details */}
           <div className="space-y-3">
             <div><label className="label" htmlFor="e-name">Project name</label><input id="e-name" className="field text-ink" value={name} onChange={(e) => setName(e.target.value)} /></div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-3 gap-3">
               <div><label className="label" htmlFor="e-status">Status</label><select id="e-status" className="field text-ink" value={status} onChange={(e) => setStatus(e.target.value)}>{STATUSES.map((s) => <option key={s} value={s}>{s.replace("_", " ")}</option>)}</select></div>
               <div><label className="label" htmlFor="e-floors">Total floors</label><input id="e-floors" type="number" min="0" className="field text-ink" value={totalFloors} onChange={(e) => setTotalFloors(e.target.value)} /></div>
+              <div><label className="label" htmlFor="e-park">Parking floors</label><input id="e-park" type="number" min="0" className="field text-ink" value={parkingFloors} onChange={(e) => setParkingFloors(e.target.value)} /></div>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div><label className="label" htmlFor="e-start">Construction start</label><input id="e-start" type="date" className="field text-ink" value={launchDate} onChange={(e) => setLaunchDate(e.target.value)} /></div>

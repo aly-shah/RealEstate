@@ -27,7 +27,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
     where: { id, companyId: user.companyId },
     select: {
       id: true, name: true, city: true, area: true, status: true, isOffPlan: true, description: true,
-      address: true, latitude: true, longitude: true, totalFloors: true, launchDate: true, completionDate: true, amenities: true,
+      address: true, latitude: true, longitude: true, totalFloors: true, parkingFloors: true, launchDate: true, completionDate: true, amenities: true,
     },
   });
   if (!project) notFound();
@@ -36,7 +36,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
     prisma.unitType.findMany({
       where: { companyId: user.companyId, projectId: id },
       orderBy: { basePrice: "asc" },
-      select: { id: true, name: true, bedrooms: true, bathrooms: true, areaValue: true, areaUnit: true, basePrice: true, floorRise: true },
+      select: { id: true, name: true, bedrooms: true, bathrooms: true, areaValue: true, areaUnit: true, basePrice: true, floorRise: true, tower: true, floorFrom: true, floorTo: true, unitsPerFloor: true },
     }),
     prisma.property.groupBy({
       by: ["status"],
@@ -79,6 +79,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
               city: project.city ?? "", area: project.area ?? "", address: project.address ?? "",
               latitude: project.latitude, longitude: project.longitude,
               totalFloors: project.totalFloors != null ? String(project.totalFloors) : "",
+              parkingFloors: project.parkingFloors != null ? String(project.parkingFloors) : "",
               isOffPlan: project.isOffPlan, launchDate: isoDate(project.launchDate), completionDate: isoDate(project.completionDate),
               amenities: project.amenities, description: project.description ?? "",
             }} />
@@ -103,7 +104,10 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
             <div>
               {project.description && <p className="text-sm leading-relaxed text-slate">{project.description}</p>}
               <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-sm sm:grid-cols-3">
-                {project.totalFloors != null && <div><dt className="text-xs text-muted">Floors</dt><dd className="font-medium text-ink">{project.totalFloors}</dd></div>}
+                {project.totalFloors != null && <div><dt className="text-xs text-muted">Floors</dt><dd className="font-medium text-ink">{project.totalFloors}{project.parkingFloors ? ` · ${project.parkingFloors} parking` : ""}</dd></div>}
+                {project.totalFloors != null && project.parkingFloors != null && project.parkingFloors < project.totalFloors && (
+                  <div><dt className="text-xs text-muted">Apartment floors</dt><dd className="font-medium text-ink">{project.parkingFloors + 1}–{project.totalFloors}</dd></div>
+                )}
                 <div><dt className="text-xs text-muted">Stage</dt><dd className="font-medium text-ink">{project.isOffPlan ? "Off-plan" : "Ready"}</dd></div>
                 {project.launchDate && <div><dt className="text-xs text-muted">Start</dt><dd className="font-medium text-ink">{fmtDate(project.launchDate)}</dd></div>}
                 {project.completionDate && <div><dt className="text-xs text-muted">Completion</dt><dd className="font-medium text-ink">{fmtDate(project.completionDate)}</dd></div>}
@@ -134,12 +138,14 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
         {unitTypes.length === 0 ? (
           <p className="text-sm text-muted">{canManage ? "Add a unit type (with a base price) before generating units." : "No unit types defined yet."}</p>
         ) : (
-          <Table head={["Type", "Beds", "Area", "Base price", "Floor rise"]}>
+          <Table head={["Type", "Beds", "Size", "Floors", "Per floor", "Base price", "Floor rise"]}>
             {unitTypes.map((t) => (
               <tr key={t.id} className="hover:bg-line-soft">
-                <Td className="font-medium text-ink">{t.name}</Td>
+                <Td className="font-medium text-ink">{t.name}{t.tower ? <span className="ml-1 text-xs text-muted">· {t.tower}</span> : null}</Td>
                 <Td className="text-muted">{t.bedrooms ?? "—"}</Td>
                 <Td className="text-muted">{t.areaValue ? `${t.areaValue} ${humanize(t.areaUnit)}` : "—"}</Td>
+                <Td className="text-muted">{t.floorFrom != null && t.floorTo != null ? `${t.floorFrom}–${t.floorTo}` : "—"}</Td>
+                <Td className="text-muted">{t.unitsPerFloor ?? "—"}</Td>
                 <Td className="font-medium">{money(t.basePrice)}</Td>
                 <Td className="text-muted">{toNumber(t.floorRise) ? `+${money(t.floorRise)}/floor` : "—"}</Td>
               </tr>

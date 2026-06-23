@@ -81,6 +81,7 @@ const updateProjectSchema = z.object({
   latitude: z.number().nullable().optional(),
   longitude: z.number().nullable().optional(),
   totalFloors: z.number().int().min(0).nullable().optional(),
+  parkingFloors: z.number().int().min(0).nullable().optional(),
   description: z.string().optional(),
   isOffPlan: z.boolean().optional(),
   launchDate: z.string().optional(),
@@ -112,6 +113,7 @@ export async function updateProject(input: UpdateProjectInput): Promise<{ ok: tr
       latitude: d.latitude ?? null,
       longitude: d.longitude ?? null,
       totalFloors: d.totalFloors ?? null,
+      parkingFloors: d.parkingFloors ?? null,
       description: d.description || null,
       isOffPlan: !!d.isOffPlan,
       launchDate: d.launchDate ? new Date(d.launchDate) : null,
@@ -301,7 +303,8 @@ function buildUnitRows(opts: {
         areaUnit: unitType.areaUnit,
         city: opts.city,
         area: opts.area,
-        salePrice: new Prisma.Decimal(unitType.basePrice + Math.max(0, f - 1) * unitType.floorRise),
+        // Base price applies on this type's lowest floor; +floorRise per floor up.
+        salePrice: new Prisma.Decimal(unitType.basePrice + Math.max(0, f - opts.floorFrom) * unitType.floorRise),
       });
     }
   }
@@ -380,6 +383,7 @@ const wizardSchema = z.object({
   latitude: z.number().nullable().optional(),
   longitude: z.number().nullable().optional(),
   totalFloors: z.number().int().min(0).nullable().optional(),
+  parkingFloors: z.number().int().min(0).nullable().optional(),
   description: z.string().optional(),
   isOffPlan: z.boolean().optional(),
   launchDate: z.string().optional(),
@@ -394,7 +398,14 @@ const wizardSchema = z.object({
     areaUnit: z.enum(AREA_UNITS).optional(),
     basePrice: z.number().min(0),
     floorRise: z.number().min(0).optional(),
+    // Placement: where this layout sits (drives generation when all are set).
+    tower: z.string().optional(),
+    floorFrom: z.number().int().nullable().optional(),
+    floorTo: z.number().int().nullable().optional(),
+    unitsPerFloor: z.number().int().min(1).nullable().optional(),
   })).optional(),
+  // Legacy generic batches (still accepted); the wizard now drives generation
+  // from per-type placement above.
   batches: z.array(z.object({
     tower: z.string().min(1),
     floorFrom: z.number().int(),
@@ -426,9 +437,21 @@ export async function createProjectFull(input: ProjectWizardInput): Promise<Wiza
   const types = d.unitTypes ?? [];
   const batches = d.batches ?? [];
 
-  // Validate batch references + total unit count before writing anything.
+  // A unit type carries placement when its floor range + per-floor are all set.
+  const hasPlacement = (t: (typeof types)[number]) =>
+    t.floorFrom != null && t.floorTo != null && t.unitsPerFloor != null && t.unitsPerFloor >= 1;
+
   const typeByKey = new Map(types.map((t) => [t.key, t]));
   let totalUnits = 0;
+  // Per-type placement (the wizard's source of inventory).
+  for (const t of types) {
+    const anyPlacement = t.floorFrom != null || t.floorTo != null || t.unitsPerFloor != null;
+    if (!anyPlacement) continue;
+    if (!hasPlacement(t)) return { ok: false, error: `Set the floors and units-per-floor for "${t.name}", or clear them.` };
+    if (t.floorTo! < t.floorFrom!) return { ok: false, error: `"${t.name}": top floor must be ≥ bottom floor.` };
+    totalUnits += (t.floorTo! - t.floorFrom! + 1) * t.unitsPerFloor!;
+  }
+  // Legacy generic batches.
   for (const b of batches) {
     if (!typeByKey.has(b.unitTypeKey)) return { ok: false, error: "An inventory row references a unit type that was removed." };
     if (b.floorTo < b.floorFrom) return { ok: false, error: `Tower ${b.tower}: top floor must be ≥ bottom floor.` };
@@ -448,6 +471,7 @@ export async function createProjectFull(input: ProjectWizardInput): Promise<Wiza
         latitude: d.latitude ?? null,
         longitude: d.longitude ?? null,
         totalFloors: d.totalFloors ?? null,
+        parkingFloors: d.parkingFloors ?? null,
         description: d.description || null,
         isOffPlan: !!d.isOffPlan,
         launchDate: d.launchDate ? new Date(d.launchDate) : null,
@@ -471,14 +495,34 @@ export async function createProjectFull(input: ProjectWizardInput): Promise<Wiza
           areaUnit: t.areaUnit ?? "SQFT",
           basePrice: new Prisma.Decimal(t.basePrice),
           floorRise: new Prisma.Decimal(t.floorRise ?? 0),
+          tower: hasPlacement(t) ? (t.tower?.trim().toUpperCase() || "A") : null,
+          floorFrom: t.floorFrom ?? null,
+          floorTo: t.floorTo ?? null,
+          unitsPerFloor: t.unitsPerFloor ?? null,
         },
         select: { id: true, name: true, bedrooms: true, bathrooms: true, areaValue: true, areaUnit: true, basePrice: true, floorRise: true },
       });
       createdByKey.set(t.key, { ...ut, basePrice: Number(ut.basePrice), floorRise: Number(ut.floorRise) });
     }
 
-    // Generate inventory for each batch.
     const rows: Prisma.PropertyCreateManyInput[] = [];
+    // Generate inventory from each unit type's placement.
+    for (const t of types) {
+      if (!hasPlacement(t)) continue;
+      rows.push(...buildUnitRows({
+        companyId: user.companyId,
+        projectId: project.id,
+        projectName: project.name,
+        city: project.city,
+        area: project.area,
+        unitType: createdByKey.get(t.key)!,
+        tower: t.tower?.trim() || "A",
+        floorFrom: t.floorFrom!,
+        floorTo: t.floorTo!,
+        unitsPerFloor: t.unitsPerFloor!,
+      }));
+    }
+    // Generate inventory for each legacy batch.
     for (const b of batches) {
       const unitType = createdByKey.get(b.unitTypeKey)!;
       rows.push(...buildUnitRows({

@@ -15,13 +15,16 @@ const AMENITIES = [
   "Backup Generator", "Security / Guards", "CCTV", "Mosque", "Community Park",
   "Kids Play Area", "Clubhouse", "Rooftop Terrace", "Standby Power", "Water Filtration",
 ];
-const STEPS = ["Details", "Location", "Amenities", "Unit types", "Inventory", "Description"];
+const STEPS = ["Details", "Location", "Amenities", "Unit types", "Description"];
 
-interface TypeRow { key: string; name: string; bedrooms: string; bathrooms: string; areaValue: string; areaUnit: string; basePrice: string; floorRise: string }
-interface BatchRow { key: string; tower: string; floorFrom: string; floorTo: string; unitsPerFloor: string; unitTypeKey: string }
+interface TypeRow {
+  key: string; name: string; bedrooms: string; bathrooms: string; areaValue: string; areaUnit: string;
+  basePrice: string; floorRise: string; tower: string; floorFrom: string; floorTo: string; unitsPerFloor: string;
+}
 
 const newKey = () => Math.random().toString(36).slice(2, 10);
 const num = (s: string) => (s.trim() === "" ? null : Number(s));
+const hasPlacement = (t: TypeRow) => t.floorFrom.trim() !== "" && t.floorTo.trim() !== "" && Number(t.unitsPerFloor) >= 1;
 
 export function ProjectWizard() {
   const router = useRouter();
@@ -36,6 +39,7 @@ export function ProjectWizard() {
   const [status, setStatus] = useState("PLANNING");
   const [isOffPlan, setIsOffPlan] = useState(true);
   const [totalFloors, setTotalFloors] = useState("");
+  const [parkingFloors, setParkingFloors] = useState("");
   const [launchDate, setLaunchDate] = useState("");
   const [completionDate, setCompletionDate] = useState("");
   // Step 2 — location
@@ -45,66 +49,72 @@ export function ProjectWizard() {
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
   // Step 3 — amenities
   const [amenities, setAmenities] = useState<string[]>([]);
-  // Step 4 / 5
+  // Step 4 — unit types (with placement)
   const [types, setTypes] = useState<TypeRow[]>([]);
-  const [batches, setBatches] = useState<BatchRow[]>([]);
-  // Step 6
+  // Step 5 — description
   const [description, setDescription] = useState("");
+
+  // Apartment floors = parkingFloors+1 … totalFloors (building composition).
+  const apartmentFrom = (Number(parkingFloors) || 0) + 1;
+  const apartmentTo = num(totalFloors);
 
   function reset() {
     setStep(0); setError(null);
-    setName(""); setStatus("PLANNING"); setIsOffPlan(true); setTotalFloors(""); setLaunchDate(""); setCompletionDate("");
-    setAddress(""); setCity(""); setArea(""); setCoords(null); setAmenities([]);
-    setTypes([]); setBatches([]); setDescription("");
+    setName(""); setStatus("PLANNING"); setIsOffPlan(true); setTotalFloors(""); setParkingFloors(""); setLaunchDate(""); setCompletionDate("");
+    setAddress(""); setCity(""); setArea(""); setCoords(null); setAmenities([]); setTypes([]); setDescription("");
   }
   const close = () => setOpen(false);
   const toggleAmenity = (a: string) => setAmenities((xs) => (xs.includes(a) ? xs.filter((x) => x !== a) : [...xs, a]));
+  const setType = (i: number, patch: Partial<TypeRow>) => setTypes((r) => r.map((x, j) => (j === i ? { ...x, ...patch } : x)));
 
-  const totalUnits = batches.reduce((s, b) => {
-    const f = Number(b.floorFrom), t = Number(b.floorTo), u = Number(b.unitsPerFloor);
-    return s + (Number.isFinite(f) && Number.isFinite(t) && t >= f ? (t - f + 1) * (u || 0) : 0);
+  const totalUnits = types.reduce((s, t) => {
+    if (!hasPlacement(t)) return s;
+    const f = Number(t.floorFrom), to = Number(t.floorTo), u = Number(t.unitsPerFloor);
+    return s + (to >= f ? (to - f + 1) * u : 0);
   }, 0);
 
   function validateStep(): string | null {
     if (step === 0 && name.trim().length < 2) return "Enter a project name.";
+    if (step === 0 && totalFloors.trim() !== "" && parkingFloors.trim() !== "" && Number(parkingFloors) >= Number(totalFloors)) return "Parking floors must be fewer than total floors.";
     if (step === 3) {
       for (const t of types) {
         if (!t.name.trim()) return "Every unit type needs a name.";
         if (t.basePrice.trim() === "" || Number(t.basePrice) < 0) return `Set a base price for "${t.name || "the type"}".`;
-      }
-    }
-    if (step === 4) {
-      for (const b of batches) {
-        if (!b.tower.trim()) return "Every inventory row needs a tower.";
-        if (!b.unitTypeKey) return "Pick a unit type for each inventory row.";
-        if (Number(b.floorTo) < Number(b.floorFrom)) return `Tower ${b.tower}: top floor must be ≥ bottom floor.`;
+        const partial = [t.floorFrom, t.floorTo, t.unitsPerFloor].some((v) => v.trim() !== "");
+        if (partial && !hasPlacement(t)) return `Complete the floors + units-per-floor for "${t.name}", or clear them.`;
+        if (hasPlacement(t) && Number(t.floorTo) < Number(t.floorFrom)) return `"${t.name}": top floor must be ≥ bottom floor.`;
       }
     }
     return null;
   }
 
-  function next() {
-    const err = validateStep();
-    if (err) return setError(err);
-    setError(null);
-    setStep((s) => Math.min(STEPS.length - 1, s + 1));
-  }
+  function next() { const e = validateStep(); if (e) return setError(e); setError(null); setStep((s) => Math.min(STEPS.length - 1, s + 1)); }
   const back = () => { setError(null); setStep((s) => Math.max(0, s - 1)); };
+
+  function addType() {
+    setTypes((r) => [...r, {
+      key: newKey(), name: "", bedrooms: "", bathrooms: "", areaValue: "", areaUnit: "SQFT", basePrice: "", floorRise: "",
+      tower: "A", floorFrom: apartmentTo ? String(apartmentFrom) : "", floorTo: apartmentTo ? String(apartmentTo) : "", unitsPerFloor: "4",
+    }]);
+  }
 
   function buildPayload(): ProjectWizardInput {
     return {
       name: name.trim(), status: status as ProjectWizardInput["status"],
       city: city.trim() || undefined, area: area.trim() || undefined, address: address.trim() || undefined,
       latitude: coords?.lat ?? null, longitude: coords?.lng ?? null,
-      totalFloors: num(totalFloors), description: description.trim() || undefined,
-      isOffPlan, launchDate: launchDate || undefined, completionDate: completionDate || undefined,
-      amenities,
+      totalFloors: num(totalFloors), parkingFloors: num(parkingFloors),
+      description: description.trim() || undefined, isOffPlan,
+      launchDate: launchDate || undefined, completionDate: completionDate || undefined, amenities,
       unitTypes: types.map((t) => ({
         key: t.key, name: t.name.trim(), bedrooms: num(t.bedrooms), bathrooms: num(t.bathrooms),
         areaValue: num(t.areaValue), areaUnit: t.areaUnit as "SQFT" | "SQM" | "SQYD" | "MARLA" | "KANAL",
         basePrice: Number(t.basePrice), floorRise: Number(t.floorRise || 0),
+        tower: t.tower.trim() || undefined,
+        floorFrom: hasPlacement(t) ? Number(t.floorFrom) : null,
+        floorTo: hasPlacement(t) ? Number(t.floorTo) : null,
+        unitsPerFloor: hasPlacement(t) ? Number(t.unitsPerFloor) : null,
       })),
-      batches: batches.map((b) => ({ tower: b.tower.trim(), floorFrom: Number(b.floorFrom), floorTo: Number(b.floorTo), unitsPerFloor: Number(b.unitsPerFloor), unitTypeKey: b.unitTypeKey })),
     };
   }
 
@@ -123,8 +133,7 @@ export function ProjectWizard() {
   }
 
   function submit() {
-    const err = validateStep();
-    if (err) return setError(err);
+    const e = validateStep(); if (e) return setError(e);
     setError(null);
     start(async () => {
       const r = await createProjectFull(buildPayload());
@@ -158,17 +167,23 @@ export function ProjectWizard() {
           <div className="space-y-4">
             <div><label className="label" htmlFor="w-name">Project name</label><input id="w-name" className="field text-ink" value={name} onChange={(e) => setName(e.target.value)} placeholder="Skyline Towers" /></div>
             <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="label" htmlFor="w-status">Status</label>
-                <select id="w-status" className="field text-ink" value={status} onChange={(e) => setStatus(e.target.value)}>{STATUSES.map((s) => <option key={s} value={s}>{s.replace("_", " ")}</option>)}</select>
+              <div><label className="label" htmlFor="w-status">Status</label><select id="w-status" className="field text-ink" value={status} onChange={(e) => setStatus(e.target.value)}>{STATUSES.map((s) => <option key={s} value={s}>{s.replace("_", " ")}</option>)}</select></div>
+              <div><label className="label flex items-center gap-2"><input type="checkbox" className="h-4 w-4 rounded border-line" checked={isOffPlan} onChange={(e) => setIsOffPlan(e.target.checked)} /> Off-plan</label><p className="mt-2 text-xs text-muted">Under construction (not ready to move in).</p></div>
+            </div>
+            <div className="rounded-xl border border-line p-3">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Building floors</p>
+              <div className="grid grid-cols-2 gap-3">
+                <div><label className="label" htmlFor="w-total">Total floors</label><input id="w-total" type="number" min="0" className="field text-ink" value={totalFloors} onChange={(e) => setTotalFloors(e.target.value)} placeholder="e.g. 20" /></div>
+                <div><label className="label" htmlFor="w-park">Parking floors</label><input id="w-park" type="number" min="0" className="field text-ink" value={parkingFloors} onChange={(e) => setParkingFloors(e.target.value)} placeholder="lowest floors, e.g. 3" /></div>
               </div>
-              <div><label className="label" htmlFor="w-floors">Total floors</label><input id="w-floors" type="number" min="0" className="field text-ink" value={totalFloors} onChange={(e) => setTotalFloors(e.target.value)} placeholder="e.g. 20" /></div>
+              {apartmentTo != null && apartmentTo >= apartmentFrom && (
+                <p className="mt-2 text-xs font-medium text-accent">🏢 Apartments on floors {apartmentFrom}–{apartmentTo}{Number(parkingFloors) > 0 ? ` · parking on floors 1–${parkingFloors}` : ""}.</p>
+              )}
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div><label className="label" htmlFor="w-start">Construction start</label><input id="w-start" type="date" className="field text-ink" value={launchDate} onChange={(e) => setLaunchDate(e.target.value)} /></div>
               <div><label className="label" htmlFor="w-finish">Expected completion</label><input id="w-finish" type="date" className="field text-ink" value={completionDate} onChange={(e) => setCompletionDate(e.target.value)} /></div>
             </div>
-            <label className="flex items-center gap-2 text-sm font-medium text-ink"><input type="checkbox" className="h-4 w-4 rounded border-line" checked={isOffPlan} onChange={(e) => setIsOffPlan(e.target.checked)} /> Off-plan (under construction)</label>
           </div>
         )}
 
@@ -177,17 +192,11 @@ export function ProjectWizard() {
           <div className="space-y-3">
             <div>
               <label className="label">Search the address</label>
-              <AddressAutocomplete
-                defaultValue={address}
-                placeholder="Start typing — e.g. DHA Phase 8, Karachi"
-                onPick={(s) => { setAddress(s.label); setCoords({ lat: s.lat, lng: s.lon }); }}
-                onClear={() => setCoords(null)}
-              />
+              <AddressAutocomplete defaultValue={address} placeholder="Start typing — e.g. DHA Phase 8, Karachi"
+                onPick={(s) => { setAddress(s.label); setCoords({ lat: s.lat, lng: s.lon }); }} onClear={() => setCoords(null)} />
               <p className="mt-1 text-xs text-muted">{coords ? `📍 Pinned at ${coords.lat.toFixed(4)}, ${coords.lng.toFixed(4)}` : "Pick a suggestion to drop a pin on the map."}</p>
             </div>
-            {coords && (
-              <div className="overflow-hidden rounded-xl border border-line"><MapView markers={marker} height={220} single zoom={15} /></div>
-            )}
+            {coords && <div className="overflow-hidden rounded-xl border border-line"><MapView markers={marker} height={220} single zoom={15} /></div>}
             <div className="grid grid-cols-2 gap-3">
               <div><label className="label" htmlFor="w-city">City</label><input id="w-city" className="field text-ink" value={city} onChange={(e) => setCity(e.target.value)} placeholder="Karachi" /></div>
               <div><label className="label" htmlFor="w-area">Area / locality</label><input id="w-area" className="field text-ink" value={area} onChange={(e) => setArea(e.target.value)} placeholder="DHA Phase 8" /></div>
@@ -213,57 +222,52 @@ export function ProjectWizard() {
           </div>
         )}
 
-        {/* Step 4 — Unit types */}
+        {/* Step 4 — Unit types (size, price + placement) */}
         {step === 3 && (
-          <div className="space-y-2">
-            <p className="text-xs text-muted">Define the layouts and pricing (floor-rise adds to the price on higher floors). Optional — you can add these later.</p>
+          <div className="space-y-3">
+            <p className="text-xs text-muted">
+              Define each layout — its size & price, then which floors it sits on and how many per floor.
+              {apartmentTo != null ? ` Apartments go on floors ${apartmentFrom}–${apartmentTo}.` : " Tip: set total floors in step 1 to pre-fill the floors."}
+            </p>
             {types.map((t, i) => (
               <div key={t.key} className="rounded-xl border border-line p-3">
-                <div className="mb-2 flex items-center justify-between"><span className="text-xs font-semibold text-muted">Type {i + 1}</span><button type="button" onClick={() => setTypes((r) => r.filter((_, j) => j !== i))} className="text-xs text-danger">Remove</button></div>
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                  <input className="field text-ink" placeholder="Name (2-Bed)" value={t.name} onChange={(e) => setTypes((r) => r.map((x, j) => j === i ? { ...x, name: e.target.value } : x))} />
-                  <input className="field text-ink" type="number" min="0" placeholder="Beds" value={t.bedrooms} onChange={(e) => setTypes((r) => r.map((x, j) => j === i ? { ...x, bedrooms: e.target.value } : x))} />
-                  <input className="field text-ink" type="number" min="0" placeholder="Baths" value={t.bathrooms} onChange={(e) => setTypes((r) => r.map((x, j) => j === i ? { ...x, bathrooms: e.target.value } : x))} />
-                  <div className="flex gap-1">
-                    <input className="field text-ink" type="number" min="0" placeholder="Area" value={t.areaValue} onChange={(e) => setTypes((r) => r.map((x, j) => j === i ? { ...x, areaValue: e.target.value } : x))} />
-                    <select className="field !w-20 text-ink" value={t.areaUnit} onChange={(e) => setTypes((r) => r.map((x, j) => j === i ? { ...x, areaUnit: e.target.value } : x))}>{AREA_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}</select>
-                  </div>
-                  <input className="field text-ink" type="number" min="0" placeholder="Base price (PKR)" value={t.basePrice} onChange={(e) => setTypes((r) => r.map((x, j) => j === i ? { ...x, basePrice: e.target.value } : x))} />
-                  <input className="field text-ink" type="number" min="0" placeholder="Floor rise / floor" value={t.floorRise} onChange={(e) => setTypes((r) => r.map((x, j) => j === i ? { ...x, floorRise: e.target.value } : x))} />
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="text-xs font-semibold text-muted">Type {i + 1}</span>
+                  <button type="button" onClick={() => setTypes((r) => r.filter((_, j) => j !== i))} className="text-xs text-danger">Remove</button>
                 </div>
+                {/* Size + price */}
+                <p className="mb-1 text-[11px] font-medium uppercase tracking-wide text-muted">Layout & price</p>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  <input className="field text-ink" placeholder="Name (2-Bed)" value={t.name} onChange={(e) => setType(i, { name: e.target.value })} />
+                  <input className="field text-ink" type="number" min="0" placeholder="Beds" value={t.bedrooms} onChange={(e) => setType(i, { bedrooms: e.target.value })} />
+                  <input className="field text-ink" type="number" min="0" placeholder="Baths" value={t.bathrooms} onChange={(e) => setType(i, { bathrooms: e.target.value })} />
+                  <div className="flex gap-1">
+                    <input className="field text-ink" type="number" min="0" placeholder="Size" value={t.areaValue} onChange={(e) => setType(i, { areaValue: e.target.value })} />
+                    <select className="field !w-20 text-ink" value={t.areaUnit} onChange={(e) => setType(i, { areaUnit: e.target.value })}>{AREA_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}</select>
+                  </div>
+                  <input className="field text-ink" type="number" min="0" placeholder="Base price (PKR)" value={t.basePrice} onChange={(e) => setType(i, { basePrice: e.target.value })} />
+                  <input className="field text-ink" type="number" min="0" placeholder="Floor rise / floor" value={t.floorRise} onChange={(e) => setType(i, { floorRise: e.target.value })} />
+                </div>
+                {/* Placement */}
+                <p className="mb-1 mt-3 text-[11px] font-medium uppercase tracking-wide text-muted">Placement (which floors · how many per floor)</p>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  <input className="field text-ink" placeholder="Tower / block (A)" value={t.tower} onChange={(e) => setType(i, { tower: e.target.value })} />
+                  <input className="field text-ink" type="number" placeholder="Floor from" value={t.floorFrom} onChange={(e) => setType(i, { floorFrom: e.target.value })} />
+                  <input className="field text-ink" type="number" placeholder="Floor to" value={t.floorTo} onChange={(e) => setType(i, { floorTo: e.target.value })} />
+                  <input className="field text-ink" type="number" min="1" placeholder="Units / floor" value={t.unitsPerFloor} onChange={(e) => setType(i, { unitsPerFloor: e.target.value })} />
+                </div>
+                {hasPlacement(t) && Number(t.floorTo) >= Number(t.floorFrom) && (
+                  <p className="mt-1.5 text-xs text-accent">{(Number(t.floorTo) - Number(t.floorFrom) + 1) * Number(t.unitsPerFloor)} units · floors {t.floorFrom}–{t.floorTo} · {t.unitsPerFloor}/floor</p>
+                )}
               </div>
             ))}
-            <button type="button" onClick={() => setTypes((r) => [...r, { key: newKey(), name: "", bedrooms: "", bathrooms: "", areaValue: "", areaUnit: "SQFT", basePrice: "", floorRise: "" }])} className="btn-ghost text-xs">+ Add unit type</button>
+            <button type="button" onClick={addType} className="btn-ghost text-xs">+ Add unit type</button>
+            {totalUnits > 0 && <p className="text-xs font-medium text-accent">{totalUnits} unit(s) will be generated in total.</p>}
           </div>
         )}
 
-        {/* Step 5 — Inventory */}
+        {/* Step 5 — Description & review */}
         {step === 4 && (
-          <div className="space-y-2">
-            {types.length === 0 ? (
-              <p className="rounded-lg border border-line bg-canvas/50 px-3 py-2 text-xs text-muted">Add a unit type first to generate inventory — or skip and do it on the project page.</p>
-            ) : (
-              <>
-                <p className="text-xs text-muted">For each tower, set which floors have apartments and how many per floor{totalFloors ? ` (this building has ${totalFloors} floors)` : ""}.</p>
-                {batches.map((b, i) => (
-                  <div key={b.key} className="grid grid-cols-2 gap-2 rounded-xl border border-line p-3 sm:grid-cols-6">
-                    <input className="field text-ink" placeholder="Tower (A)" value={b.tower} onChange={(e) => setBatches((r) => r.map((x, j) => j === i ? { ...x, tower: e.target.value } : x))} />
-                    <input className="field text-ink" type="number" placeholder="Floor from" value={b.floorFrom} onChange={(e) => setBatches((r) => r.map((x, j) => j === i ? { ...x, floorFrom: e.target.value } : x))} />
-                    <input className="field text-ink" type="number" placeholder="Floor to" value={b.floorTo} onChange={(e) => setBatches((r) => r.map((x, j) => j === i ? { ...x, floorTo: e.target.value } : x))} />
-                    <input className="field text-ink" type="number" min="1" placeholder="Per floor" value={b.unitsPerFloor} onChange={(e) => setBatches((r) => r.map((x, j) => j === i ? { ...x, unitsPerFloor: e.target.value } : x))} />
-                    <select className="field text-ink" value={b.unitTypeKey} onChange={(e) => setBatches((r) => r.map((x, j) => j === i ? { ...x, unitTypeKey: e.target.value } : x))}><option value="">Type…</option>{types.map((t) => <option key={t.key} value={t.key}>{t.name || "Unnamed"}</option>)}</select>
-                    <button type="button" onClick={() => setBatches((r) => r.filter((_, j) => j !== i))} className="btn-ghost !px-2 text-danger">✕</button>
-                  </div>
-                ))}
-                <button type="button" onClick={() => setBatches((r) => [...r, { key: newKey(), tower: "", floorFrom: "1", floorTo: totalFloors || "10", unitsPerFloor: "4", unitTypeKey: types[0]?.key ?? "" }])} className="btn-ghost text-xs">+ Add tower</button>
-                {totalUnits > 0 && <p className="text-xs font-medium text-accent">{totalUnits} unit(s) will be generated.</p>}
-              </>
-            )}
-          </div>
-        )}
-
-        {/* Step 6 — Description & review */}
-        {step === 5 && (
           <div className="space-y-3">
             <div>
               <div className="mb-1 flex items-center justify-between">
@@ -274,7 +278,7 @@ export function ProjectWizard() {
             </div>
             <div className="rounded-xl border border-line p-3 text-sm">
               <p className="text-base font-semibold text-ink">{name || "Untitled project"}</p>
-              <p className="text-xs text-muted">{[area, city].filter(Boolean).join(", ") || "No location"}{coords ? " · 📍 mapped" : ""} · {status.replace("_", " ")}{totalFloors ? ` · ${totalFloors} floors` : ""}{isOffPlan ? " · Off-plan" : ""}</p>
+              <p className="text-xs text-muted">{[area, city].filter(Boolean).join(", ") || "No location"}{coords ? " · 📍 mapped" : ""} · {status.replace("_", " ")}{totalFloors ? ` · ${totalFloors} floors` : ""}{Number(parkingFloors) > 0 ? ` (${parkingFloors} parking)` : ""}{isOffPlan ? " · Off-plan" : ""}</p>
               {amenities.length > 0 && <p className="mt-1 text-xs text-slate">{amenities.join(" · ")}</p>}
               <div className="mt-2 flex flex-wrap gap-x-4 text-xs text-muted">
                 <span>{types.length} unit type(s)</span>

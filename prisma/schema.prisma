@@ -533,8 +533,10 @@ model Project {
   // Map location, captured via the geocoder in the create-project wizard.
   latitude       Float?
   longitude      Float?
-  // Building height (drives the inventory step's floor range).
+  // Building height + how many of the lowest floors are parking (so the
+  // apartment floors = parkingFloors+1 … totalFloors).
   totalFloors    Int?
+  parkingFloors  Int?
   isOffPlan      Boolean       @default(false)
   status         ProjectStatus @default(PLANNING)
   // launchDate = construction start; completionDate = expected handover.
@@ -555,21 +557,27 @@ model Project {
 // Buyers/dealers see the "from" price; the generator computes each unit's price
 // as basePrice + (floorNumber - 1) * floorRise.
 model UnitType {
-  id         String     @id @default(cuid())
-  companyId  String
-  company    Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  projectId  String
-  project    Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  name       String
-  bedrooms   Int?
-  bathrooms  Int?
-  areaValue  Float?
-  areaUnit   AreaUnit   @default(SQFT)
-  basePrice  Decimal    @db.Decimal(14, 2)
-  // Amount added to the price for each floor above the first (floor-rise pricing).
-  floorRise  Decimal    @default(0) @db.Decimal(14, 2)
-  createdAt  DateTime   @default(now())
-  properties Property[]
+  id            String     @id @default(cuid())
+  companyId     String
+  company       Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  projectId     String
+  project       Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  name          String
+  bedrooms      Int?
+  bathrooms     Int?
+  areaValue     Float?
+  areaUnit      AreaUnit   @default(SQFT)
+  basePrice     Decimal    @db.Decimal(14, 2)
+  // Amount added per floor above this type's lowest floor (floor-rise pricing).
+  floorRise     Decimal    @default(0) @db.Decimal(14, 2)
+  // Placement within the building — which tower/floors this layout occupies and
+  // how many sit on each of those floors. Drives unit generation.
+  tower         String?
+  floorFrom     Int?
+  floorTo       Int?
+  unitsPerFloor Int?
+  createdAt     DateTime   @default(now())
+  properties    Property[]
 
   @@index([companyId])
   @@index([projectId])
