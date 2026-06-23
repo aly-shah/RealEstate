@@ -12,12 +12,15 @@ interface DemoAccount {
   hintKey: "owner" | "admin" | "agent" | "dealer" | "super";
 }
 
+// These mirror the accounts actually present in the deployed database (the
+// Skyline tenant + the platform super-admin), so the one-click demo buttons log
+// in straight away. Password for all of them is "password".
 const DEMO_ACCOUNTS: DemoAccount[] = [
-  { role: "Owner",       email: "owner@proptimizr.test",  hintKey: "owner"  },
-  { role: "Admin",       email: "admin@proptimizr.test",  hintKey: "admin"  },
-  { role: "Agent",       email: "agent@proptimizr.test",  hintKey: "agent"  },
-  { role: "Dealer",      email: "dealer@proptimizr.test", hintKey: "dealer" },
-  { role: "Super Admin", email: "support@proptimizr.com", hintKey: "super"  },
+  { role: "Owner",       email: "owner@skyline.test",     hintKey: "owner"  },
+  { role: "Admin",       email: "admin@skyline.test",     hintKey: "admin"  },
+  { role: "Agent",       email: "agent@skyline.test",     hintKey: "agent"  },
+  { role: "Dealer",      email: "dealer@skyline.test",    hintKey: "dealer" },
+  { role: "Super Admin", email: "super@scalamatic.test",  hintKey: "super"  },
 ];
 
 interface LoginFormProps {
