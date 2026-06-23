@@ -33,6 +33,7 @@ export const NAV: NavItem[] = [
   { href: "/commissions",   label: "Commissions",   icon: "percent",    roles: ALL,                          group: "finance" },
   { href: "/invoices",      label: "Invoices",      icon: "document",   roles: OFFICE,                       group: "finance" },
   { href: "/payments",      label: "Payments",      icon: "banknote",   roles: OFFICE,                       group: "finance" },
+  { href: "/payment-plans", label: "Payment plans", icon: "percent",    roles: OFFICE,                       group: "finance" },
 
   { href: "/agents",        label: "Agents",        icon: "users",      roles: OFFICE,                       group: "people" },
   { href: "/dealers",       label: "Dealers",       icon: "store",      roles: OFFICE,                       group: "people" },

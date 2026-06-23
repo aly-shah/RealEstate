@@ -433,6 +433,7 @@ model Company {
   projects            Project[]
   unitTypes           UnitType[]
   bookings            Booking[]
+  paymentPlans        PaymentPlanTemplate[]
   dealers             Dealer[]
   clients             Client[]
   leads               Lead[]
@@ -718,33 +719,70 @@ enum BookingStatus {
 }
 
 model Booking {
-  id           String        @id @default(cuid())
-  companyId    String
-  company      Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  propertyId   String
-  property     Property      @relation(fields: [propertyId], references: [id], onDelete: Cascade)
-  dealerId     String?
-  clientId     String?
+  id            String        @id @default(cuid())
+  companyId     String
+  company       Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  propertyId    String
+  property      Property      @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  dealerId      String?
+  clientId      String?
   // Buyer captured inline when there's no Client record yet.
-  clientName   String?
-  clientPhone  String?
-  bookedById   String?
-  status       BookingStatus @default(PENDING)
+  clientName    String?
+  clientPhone   String?
+  bookedById    String?
+  status        BookingStatus @default(PENDING)
   // Agreed sale price (may differ from the unit's list price after a discount).
-  price        Decimal       @db.Decimal(14, 2)
-  discount     Decimal?      @db.Decimal(14, 2)
-  notes        String?
-  reviewedById String?
-  reviewedAt   DateTime?
-  reviewNote   String?
+  price         Decimal       @db.Decimal(14, 2)
+  discount      Decimal?      @db.Decimal(14, 2)
+  notes         String?
+  // Optional installment plan applied to the schedule when approved.
+  paymentPlanId String?
+  // The Deal created on approval (revenue record the payment schedule hangs off).
+  dealId        String?
+  reviewedById  String?
+  reviewedAt    DateTime?
+  reviewNote    String?
   // Optimistic-lock counter so two approvers can't both action one booking.
-  version      Int           @default(0)
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @default(now()) @updatedAt
+  version       Int           @default(0)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @default(now()) @updatedAt
 
   @@index([companyId, status])
   @@index([propertyId])
   @@index([dealerId])
+}
+
+// Reusable installment plan (e.g. "10% booking, 10% confirmation, 80% over 36
+// months"). Applied to a booking on approval to auto-generate the Payment
+// schedule against the created Deal.
+model PaymentPlanTemplate {
+  id          String             @id @default(cuid())
+  companyId   String
+  company     Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  createdAt   DateTime           @default(now())
+  milestones  PaymentMilestone[]
+
+  @@index([companyId])
+}
+
+model PaymentMilestone {
+  id             String              @id @default(cuid())
+  templateId     String
+  template       PaymentPlanTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  order          Int                 @default(0)
+  label          String
+  // Total % of the sale price this milestone covers (split across `count`).
+  pct            Decimal             @db.Decimal(6, 3)
+  type           PaymentType         @default(INSTALMENT)
+  // Number of payments this milestone expands into (e.g. 36 monthly installments).
+  count          Int                 @default(1)
+  // Months from approval to the first payment, and the spacing between them.
+  firstDueMonths Int                 @default(0)
+  intervalMonths Int                 @default(1)
+
+  @@index([templateId])
 }
 
 model PropertyMedia {

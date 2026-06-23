@@ -6,9 +6,10 @@ import { Drawer } from "@/components/ui/Drawer";
 
 interface Unit { id: string; label: string; price: number }
 interface Client { id: string; name: string }
+interface Plan { id: string; name: string }
 
 /** Book an available unit for a buyer. Picking a unit prefills its list price. */
-export function NewBookingButton({ units, clients }: { units: Unit[]; clients: Client[] }) {
+export function NewBookingButton({ units, clients, plans }: { units: Unit[]; clients: Client[]; plans: Plan[] }) {
   const [open, setOpen] = useState(false);
   const [price, setPrice] = useState<number | "">("");
   const [state, action, pending] = useActionState<FormState, FormData>(async (p, fd) => {
@@ -51,6 +52,16 @@ export function NewBookingButton({ units, clients }: { units: Unit[]; clients: C
             </div>
             <div><label className="label" htmlFor="b-discount">Discount (optional)</label><input id="b-discount" name="discount" type="number" min="0" className="field" /></div>
           </div>
+          {plans.length > 0 && (
+            <div>
+              <label className="label" htmlFor="b-plan">Payment plan (optional)</label>
+              <select id="b-plan" name="paymentPlanId" className="field" defaultValue="">
+                <option value="">— None (no schedule) —</option>
+                {plans.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+              <p className="mt-1 text-xs text-muted">The installment schedule is generated when the booking is approved.</p>
+            </div>
+          )}
           <div><label className="label" htmlFor="b-notes">Notes</label><textarea id="b-notes" name="notes" rows={2} className="field" /></div>
           <div className="flex justify-end gap-2 pt-1">
             <button type="button" onClick={() => setOpen(false)} className="btn-ghost">Cancel</button>

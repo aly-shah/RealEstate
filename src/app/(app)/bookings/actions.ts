@@ -8,6 +8,8 @@ import { requireCompanyUser, isScopedToSelf, type SessionUser } from "@/lib/sess
 import { can } from "@/lib/rbac";
 import { casUpdate, casUpdateGuarded } from "@/lib/concurrency";
 import { logActivity } from "@/lib/activity";
+import { nextDealReference } from "@/lib/refs";
+import { expandSchedule } from "@/lib/payment-plan";
 
 export type FormState = { ok?: boolean; error?: string; fieldErrors?: Record<string, string[]> };
 
@@ -25,6 +27,7 @@ const bookingSchema = z.object({
   clientPhone: z.string().optional(),
   price: z.coerce.number().min(0, "Price must be ≥ 0"),
   discount: z.coerce.number().min(0).optional(),
+  paymentPlanId: z.string().optional(),
   notes: z.string().optional(),
 });
 
@@ -70,6 +73,7 @@ export async function createBooking(_prev: FormState, formData: FormData): Promi
       bookedById: user.id,
       price: new Prisma.Decimal(d.price),
       discount: d.discount != null ? new Prisma.Decimal(d.discount) : null,
+      paymentPlanId: d.paymentPlanId || null,
       notes: d.notes?.trim() || null,
     },
   });
@@ -85,33 +89,93 @@ export async function createBooking(_prev: FormState, formData: FormData): Promi
   return { ok: true };
 }
 
-/** Office approves a pending booking: booking → APPROVED, unit RESERVED → SOLD. */
+/**
+ * Office approves a pending booking. Atomically (one transaction): claims the
+ * booking (PENDING → APPROVED, version-guarded), creates the revenue record
+ * (a SALE Deal + Sale at the agreed price), generates the installment Payment
+ * schedule from the chosen plan, marks the unit SOLD, and links the deal back
+ * to the booking. The deal reference is allocated outside the txn with a
+ * retry-on-collision loop (a P2002 inside a txn aborts it).
+ */
 export async function approveBooking(bookingId: string): Promise<FormState> {
   const user = await requireCompanyUser();
   if (isScopedToSelf(user.role)) return { error: "Not allowed." };
+  const companyId = user.companyId;
 
   const b = await prisma.booking.findFirst({
-    where: { id: bookingId, companyId: user.companyId, status: "PENDING" },
-    select: { id: true, version: true, propertyId: true },
+    where: { id: bookingId, companyId, status: "PENDING" },
+    select: { id: true, version: true, propertyId: true, clientId: true, dealerId: true, price: true, paymentPlanId: true, dealId: true },
   });
   if (!b) return { error: "Booking not found or already processed." };
 
-  try {
-    await casUpdate(prisma.booking, b.id, user.companyId, b.version, {
-      status: "APPROVED", reviewedById: user.id, reviewedAt: new Date(),
+  const price = Number(b.price);
+
+  // Resolve the installment schedule from the plan (read-only, before the txn).
+  let scheduleRows: { type: "TOKEN" | "BOOKING" | "DOWN_PAYMENT" | "INSTALMENT" | "DEPOSIT"; label: string; amount: number; dueDate: Date }[] = [];
+  if (b.paymentPlanId) {
+    const plan = await prisma.paymentPlanTemplate.findFirst({
+      where: { id: b.paymentPlanId, companyId },
+      select: { milestones: { orderBy: { order: "asc" }, select: { label: true, pct: true, type: true, count: true, firstDueMonths: true, intervalMonths: true } } },
     });
-  } catch {
-    return { error: "This booking changed — reload and try again." };
+    if (plan) {
+      scheduleRows = expandSchedule(price, new Date(), plan.milestones.map((m) => ({
+        label: m.label, pct: Number(m.pct), type: m.type, count: m.count, firstDueMonths: m.firstDueMonths, intervalMonths: m.intervalMonths,
+      }))) as typeof scheduleRows;
+    }
   }
-  // Mark the unit SOLD (only if still RESERVED — guards a double action).
-  await casUpdateGuarded(prisma.property, { id: b.propertyId, companyId: user.companyId, status: "RESERVED" }, { status: "SOLD" });
+
+  let dealId: string | null = null;
+  let conflict = false;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const reference = await nextDealReference(companyId);
+    try {
+      await prisma.$transaction(async (tx) => {
+        // Claim the booking — version guard ensures a single approver.
+        const claimed = await tx.booking.updateMany({
+          where: { id: b.id, companyId, status: "PENDING", version: b.version },
+          data: { status: "APPROVED", reviewedById: user.id, reviewedAt: new Date(), version: { increment: 1 } },
+        });
+        if (claimed.count === 0) { conflict = true; throw new Error("CONFLICT"); }
+
+        const deal = await tx.deal.create({
+          data: {
+            companyId, reference, type: "SALE", status: "BOOKED",
+            propertyId: b.propertyId, clientId: b.clientId, dealerId: b.dealerId,
+            sale: { create: { salePrice: new Prisma.Decimal(price) } },
+          },
+          select: { id: true },
+        });
+        dealId = deal.id;
+
+        if (scheduleRows.length) {
+          await tx.payment.createMany({
+            data: scheduleRows.map((s) => ({
+              companyId, dealId: deal.id, type: s.type, notes: s.label,
+              amount: new Prisma.Decimal(s.amount), status: "PENDING" as const, dueDate: s.dueDate,
+            })),
+          });
+        }
+
+        await tx.property.updateMany({ where: { id: b.propertyId, companyId, status: "RESERVED" }, data: { status: "SOLD", version: { increment: 1 } } });
+        await tx.booking.update({ where: { id: b.id }, data: { dealId: deal.id } });
+      });
+      break;
+    } catch (e) {
+      if (conflict) return { error: "This booking changed — reload and try again." };
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") { dealId = null; continue; }
+      throw e;
+    }
+  }
+  if (!dealId) return { error: "Could not allocate a deal reference. Try again." };
 
   await logActivity({
-    companyId: user.companyId, userId: user.id, action: "booking.approved",
-    entityType: "PROPERTY", entityId: b.propertyId, summary: `Approved booking — unit marked sold`,
-    meta: { bookingId: b.id },
+    companyId, userId: user.id, action: "booking.approved",
+    entityType: "DEAL", entityId: dealId,
+    summary: `Approved booking — created deal + ${scheduleRows.length} scheduled payment(s)`,
+    meta: { bookingId: b.id, payments: scheduleRows.length },
   });
   revalidatePath("/bookings");
+  revalidatePath("/payments");
   return { ok: true };
 }
 

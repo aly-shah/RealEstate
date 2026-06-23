@@ -59,6 +59,9 @@ export default async function BookingsPage() {
       : [],
     canBook ? prisma.client.findMany({ where: { companyId: user.companyId }, orderBy: { name: "asc" }, take: 500, select: { id: true, name: true } }) : [],
   ]);
+  const plans = canBook
+    ? await prisma.paymentPlanTemplate.findMany({ where: { companyId: user.companyId }, orderBy: { name: "asc" }, select: { id: true, name: true } })
+    : [];
   const dealerName = new Map(dealers.map((d) => [d.id, d.name]));
   const clientName = new Map(clients.map((c) => [c.id, c.name]));
 
@@ -70,7 +73,7 @@ export default async function BookingsPage() {
         eyebrow="Channel sales"
         title="Bookings"
         subtitle={office ? `${pendingCount} pending approval` : "Your unit bookings and their approval status."}
-        action={canBook ? <NewBookingButton units={bookableUnits.map((u) => ({ id: u.id, label: `${u.reference}${u.project ? " · " + u.project.name : ""}`, price: u.salePrice ? Number(u.salePrice) : 0 }))} clients={allClients} /> : null}
+        action={canBook ? <NewBookingButton units={bookableUnits.map((u) => ({ id: u.id, label: `${u.reference}${u.project ? " · " + u.project.name : ""}`, price: u.salePrice ? Number(u.salePrice) : 0 }))} clients={allClients} plans={plans} /> : null}
       />
 
       {bookings.length === 0 ? (
