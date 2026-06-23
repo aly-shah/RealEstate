@@ -7,7 +7,8 @@ import { prisma } from "@/lib/prisma";
 import { requireCompanyUser, isScopedToSelf, type SessionUser } from "@/lib/session";
 import { can } from "@/lib/rbac";
 import { casUpdate, casUpdateGuarded } from "@/lib/concurrency";
-import { logActivity } from "@/lib/activity";
+import { logActivity, notify } from "@/lib/activity";
+import { invalidateCompanyMetrics } from "@/lib/metrics";
 import { nextDealReference } from "@/lib/refs";
 import { expandSchedule } from "@/lib/payment-plan";
 
@@ -110,6 +111,23 @@ export async function approveBooking(bookingId: string): Promise<FormState> {
 
   const price = Number(b.price);
 
+  // Dealer commission (channel sale): the dealer earns their agreed share % of
+  // the sale price. The builder keeps the rest as revenue, so this is a single
+  // DEALER share — not a full GCI split. Generated as PENDING_APPROVAL so it
+  // flows through the existing owner commission-approval queue.
+  let dealerComm: { dealerId: string; name: string; pct: number; amount: number } | null = null;
+  if (b.dealerId) {
+    const dealer = await prisma.dealer.findFirst({
+      where: { id: b.dealerId, companyId },
+      select: { id: true, name: true, defaultSharePct: true },
+    });
+    const pct = Number(dealer?.defaultSharePct ?? 0);
+    const amount = Math.round(((price * pct) / 100) * 100) / 100;
+    if (dealer && pct > 0 && amount > 0) {
+      dealerComm = { dealerId: dealer.id, name: dealer.name, pct, amount };
+    }
+  }
+
   // Resolve the installment schedule from the plan (read-only, before the txn).
   let scheduleRows: { type: "TOKEN" | "BOOKING" | "DOWN_PAYMENT" | "INSTALMENT" | "DEPOSIT"; label: string; amount: number; dueDate: Date }[] = [];
   if (b.paymentPlanId) {
@@ -156,6 +174,22 @@ export async function approveBooking(bookingId: string): Promise<FormState> {
           });
         }
 
+        if (dealerComm) {
+          await tx.commission.create({
+            data: {
+              companyId, dealId: deal.id,
+              totalAmount: new Prisma.Decimal(dealerComm.amount),
+              status: "PENDING_APPROVAL",
+              shares: {
+                create: [{
+                  party: "DEALER", dealerId: dealerComm.dealerId, label: dealerComm.name,
+                  pct: new Prisma.Decimal(dealerComm.pct), amount: new Prisma.Decimal(dealerComm.amount),
+                }],
+              },
+            },
+          });
+        }
+
         await tx.property.updateMany({ where: { id: b.propertyId, companyId, status: "RESERVED" }, data: { status: "SOLD", version: { increment: 1 } } });
         await tx.booking.update({ where: { id: b.id }, data: { dealId: deal.id } });
       });
@@ -168,14 +202,29 @@ export async function approveBooking(bookingId: string): Promise<FormState> {
   }
   if (!dealId) return { error: "Could not allocate a deal reference. Try again." };
 
+  // A dealer commission was created → it needs owner approval. Notify approvers.
+  if (dealerComm) {
+    const approvers = await prisma.user.findMany({
+      where: { companyId, role: { in: ["OWNER", "ADMIN"] } },
+      select: { id: true },
+    });
+    await Promise.all(approvers.map((a) => notify({
+      companyId, userId: a.id, type: "COMMISSION_APPROVAL",
+      title: `Commission to approve — ${dealerComm.name}`,
+      link: "/commissions",
+    })));
+    invalidateCompanyMetrics(companyId);
+  }
+
   await logActivity({
     companyId, userId: user.id, action: "booking.approved",
     entityType: "DEAL", entityId: dealId,
-    summary: `Approved booking — created deal + ${scheduleRows.length} scheduled payment(s)`,
-    meta: { bookingId: b.id, payments: scheduleRows.length },
+    summary: `Approved booking — deal + ${scheduleRows.length} payment(s)${dealerComm ? ` + ${Math.round(dealerComm.amount).toLocaleString()} dealer commission` : ""}`,
+    meta: { bookingId: b.id, payments: scheduleRows.length, dealerCommission: dealerComm?.amount ?? 0 },
   });
   revalidatePath("/bookings");
   revalidatePath("/payments");
+  if (dealerComm) revalidatePath("/commissions");
   return { ok: true };
 }
 
