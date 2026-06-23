@@ -26,6 +26,10 @@ const AMENITY_SET = new Set(PROJECT_AMENITIES);
 // can hand us a stray decimal — round rather than hard-fail the whole form.
 const roundInt = (n: number) => Math.round(n);
 
+// FormData sends blank optional number fields as "" — coerce those to undefined
+// so an empty box doesn't become 0 (e.g. an empty placement floor).
+const emptyToUndef = (v: unknown) => (typeof v === "string" && v.trim() === "" ? undefined : v);
+
 /** Office-only gate for managing builder inventory (create project, price list, generate units). */
 async function requireInventoryManager() {
   const user = await requireCompanyUser();
@@ -159,14 +163,24 @@ export async function updateProjectStatus(projectId: string, status: string): Pr
 const unitTypeSchema = z.object({
   projectId: z.string().min(1),
   name: z.string().min(1, "Type name is required"),
-  bedrooms: z.coerce.number().min(0).transform(roundInt).optional(),
-  bathrooms: z.coerce.number().min(0).transform(roundInt).optional(),
-  areaValue: z.coerce.number().min(0).optional(),
+  bedrooms: z.preprocess(emptyToUndef, z.coerce.number().min(0).transform(roundInt).optional()),
+  bathrooms: z.preprocess(emptyToUndef, z.coerce.number().min(0).transform(roundInt).optional()),
+  areaValue: z.preprocess(emptyToUndef, z.coerce.number().min(0).optional()),
   areaUnit: z.enum(["SQFT", "SQM", "SQYD", "MARLA", "KANAL"]).optional(),
   basePrice: z.coerce.number().min(0, "Base price must be ≥ 0"),
-  floorRise: z.coerce.number().min(0).optional(),
+  floorRise: z.preprocess(emptyToUndef, z.coerce.number().min(0).optional()),
+  // Optional placement — when all are set, the type's units are generated too.
+  tower: z.string().optional(),
+  floorFrom: z.preprocess(emptyToUndef, z.coerce.number().transform(roundInt).optional()),
+  floorTo: z.preprocess(emptyToUndef, z.coerce.number().transform(roundInt).optional()),
+  unitsPerFloor: z.preprocess(emptyToUndef, z.coerce.number().min(1).transform(roundInt).optional()),
 });
 
+/**
+ * Add a unit type to a project. If the layout's placement (floors + units per
+ * floor) is supplied, its inventory is generated in the same transaction — so
+ * "add a unit" is one integrated step instead of add-type-then-generate.
+ */
 export async function addUnitType(_prev: FormState, formData: FormData): Promise<FormState> {
   const { user, allowed } = await requireInventoryManager();
   if (!allowed) return { error: "Not allowed." };
@@ -178,21 +192,58 @@ export async function addUnitType(_prev: FormState, formData: FormData): Promise
   const d = parsed.data;
 
   // Confirm the project belongs to this tenant before attaching a type to it.
-  const project = await prisma.project.findFirst({ where: { id: d.projectId, companyId: user.companyId }, select: { id: true } });
+  const project = await prisma.project.findFirst({ where: { id: d.projectId, companyId: user.companyId }, select: { id: true, name: true, city: true, area: true } });
   if (!project) return { error: "Project not found." };
 
-  await prisma.unitType.create({
-    data: {
-      companyId: user.companyId,
-      projectId: d.projectId,
-      name: d.name,
-      bedrooms: d.bedrooms ?? null,
-      bathrooms: d.bathrooms ?? null,
-      areaValue: d.areaValue ?? null,
-      areaUnit: d.areaUnit ?? "SQFT",
-      basePrice: new Prisma.Decimal(d.basePrice),
-      floorRise: new Prisma.Decimal(d.floorRise ?? 0),
-    },
+  const hasPlacement = d.floorFrom != null && d.floorTo != null && d.unitsPerFloor != null && d.unitsPerFloor >= 1;
+  if (hasPlacement) {
+    if (d.floorTo! < d.floorFrom!) return { error: "Top floor must be ≥ bottom floor." };
+    const total = (d.floorTo! - d.floorFrom! + 1) * d.unitsPerFloor!;
+    if (total > MAX_UNITS_PER_RUN) return { error: `That would create ${total} units — keep it under ${MAX_UNITS_PER_RUN}.` };
+  }
+
+  await prisma.$transaction(async (tx) => {
+    const ut = await tx.unitType.create({
+      data: {
+        companyId: user.companyId,
+        projectId: d.projectId,
+        name: d.name,
+        bedrooms: d.bedrooms ?? null,
+        bathrooms: d.bathrooms ?? null,
+        areaValue: d.areaValue ?? null,
+        areaUnit: d.areaUnit ?? "SQFT",
+        basePrice: new Prisma.Decimal(d.basePrice),
+        floorRise: new Prisma.Decimal(d.floorRise ?? 0),
+        tower: hasPlacement ? (d.tower?.trim().toUpperCase() || "A") : null,
+        floorFrom: d.floorFrom ?? null,
+        floorTo: d.floorTo ?? null,
+        unitsPerFloor: d.unitsPerFloor ?? null,
+      },
+      select: { id: true, name: true, bedrooms: true, bathrooms: true, areaValue: true, areaUnit: true, basePrice: true, floorRise: true },
+    });
+    if (hasPlacement) {
+      const rows = buildUnitRows({
+        companyId: user.companyId,
+        projectId: d.projectId,
+        projectName: project.name,
+        city: project.city,
+        area: project.area,
+        unitType: { ...ut, basePrice: Number(ut.basePrice), floorRise: Number(ut.floorRise) },
+        tower: d.tower?.trim() || "A",
+        floorFrom: d.floorFrom!,
+        floorTo: d.floorTo!,
+        unitsPerFloor: d.unitsPerFloor!,
+      });
+      await tx.property.createMany({ data: rows, skipDuplicates: true });
+    }
+  });
+
+  await logActivity({
+    companyId: user.companyId, userId: user.id, action: hasPlacement ? "project.units_generated" : "project.unit_type_added",
+    entityType: "PROPERTY", entityId: d.projectId,
+    summary: hasPlacement
+      ? `Added ${d.name} + ${(d.floorTo! - d.floorFrom! + 1) * d.unitsPerFloor!} unit(s)`
+      : `Added unit type ${d.name}`,
   });
 
   revalidatePath(`/projects/${d.projectId}`);

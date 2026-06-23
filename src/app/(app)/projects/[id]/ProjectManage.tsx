@@ -7,6 +7,7 @@ import { Drawer } from "@/components/ui/Drawer";
 
 const STATUSES = ["PLANNING", "PRE_LAUNCH", "SELLING", "SOLD_OUT", "COMPLETED", "ON_HOLD"];
 const AREA_UNITS = ["SQFT", "SQYD", "SQM", "MARLA", "KANAL"];
+const lbl = "mb-0.5 block text-[10px] font-medium uppercase tracking-wide text-muted";
 
 interface Props {
   projectId: string;
@@ -15,13 +16,25 @@ interface Props {
   hasTypes: boolean;
   dealers: { id: string; name: string }[];
   towers: string[];
+  totalFloors: number | null;
+  parkingFloors: number | null;
 }
 
-export function ProjectManage({ projectId, status, unitTypes, hasTypes, dealers, towers }: Props) {
+export function ProjectManage({ projectId, status, unitTypes, hasTypes, dealers, towers, totalFloors, parkingFloors }: Props) {
   const [typeOpen, setTypeOpen] = useState(false);
   const [genOpen, setGenOpen] = useState(false);
   const [allocOpen, setAllocOpen] = useState(false);
   const [statusPending, startStatus] = useTransition();
+
+  // Apartment floor range (parking+1 … total) — pre-fills the placement fields.
+  const apartFrom = (parkingFloors ?? 0) + 1;
+  const [pFrom, setPFrom] = useState(totalFloors ? String(apartFrom) : "");
+  const [pTo, setPTo] = useState(totalFloors ? String(totalFloors) : "");
+  const [pPer, setPPer] = useState("");
+  const placeCount = (() => {
+    const f = Number(pFrom), t = Number(pTo), u = Number(pPer);
+    return pFrom && pTo && pPer && t >= f ? (t - f + 1) * u : 0;
+  })();
 
   const [allocState, allocAction, allocPending] = useActionState<FormState, FormData>(async (p, fd) => {
     const r = await allocateTower(p, fd);
@@ -52,45 +65,50 @@ export function ProjectManage({ projectId, status, unitTypes, hasTypes, dealers,
       >
         {STATUSES.map((s) => <option key={s} value={s}>{humanize(s)}</option>)}
       </select>
-      <button onClick={() => setTypeOpen(true)} className="btn-ghost">+ Unit type</button>
+      <button onClick={() => setTypeOpen(true)} className="btn-accent">+ Add unit</button>
       <button onClick={() => setAllocOpen(true)} className="btn-ghost" disabled={towers.length === 0 || dealers.length === 0} title={dealers.length === 0 ? "Add a dealer first" : towers.length === 0 ? "Generate units first" : ""}>Allocate</button>
-      <button onClick={() => setGenOpen(true)} className="btn-accent" disabled={!hasTypes} title={hasTypes ? "" : "Add a unit type first"}>Generate units</button>
+      <button onClick={() => setGenOpen(true)} className="btn-ghost" disabled={!hasTypes} title={hasTypes ? "" : "Add a unit type first"}>Generate more</button>
 
-      {/* Add unit type */}
-      <Drawer open={typeOpen} onClose={() => setTypeOpen(false)} title="Add unit type" description="A layout + its base price." width="md">
-        <form action={typeAction} className="space-y-3">
+      {/* Add unit — layout, price + placement (generates the units in one step) */}
+      <Drawer open={typeOpen} onClose={() => setTypeOpen(false)} title="Add unit" description="Define the layout & price, then where it sits — its units are generated for you." width="lg">
+        <form action={typeAction} className="space-y-4">
           <input type="hidden" name="projectId" value={projectId} />
-          {typeState.error && <p className="rounded-lg bg-danger-bg px-3 py-2 text-xs text-danger">{typeState.error}</p>}
+          {typeState.error && <p className="rounded-lg bg-danger-bg px-3 py-2 text-xs font-medium text-danger">{typeState.error}</p>}
+
           <div>
-            <label className="label" htmlFor="t-name">Name</label>
-            <input id="t-name" name="name" className="field" placeholder="e.g. 2-Bed" required />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div><label className="label" htmlFor="t-beds">Bedrooms</label><input id="t-beds" name="bedrooms" type="number" min="0" className="field" /></div>
-            <div><label className="label" htmlFor="t-baths">Bathrooms</label><input id="t-baths" name="bathrooms" type="number" min="0" className="field" /></div>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div><label className="label" htmlFor="t-area">Area</label><input id="t-area" name="areaValue" type="number" min="0" step="any" className="field" /></div>
-            <div>
-              <label className="label" htmlFor="t-areaunit">Unit</label>
-              <select id="t-areaunit" name="areaUnit" className="field" defaultValue="SQFT">
-                {AREA_UNITS.map((u) => <option key={u} value={u}>{humanize(u)}</option>)}
-              </select>
+            <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-muted">Layout & price</p>
+            <div className="grid grid-cols-2 gap-x-2 gap-y-2.5 sm:grid-cols-6">
+              <div className="sm:col-span-2"><label className={lbl}>Name</label><input name="name" className="field text-ink" placeholder="2-Bed" required /></div>
+              <div><label className={lbl}>Beds</label><input name="bedrooms" type="number" min="0" className="field text-ink" /></div>
+              <div><label className={lbl}>Baths</label><input name="bathrooms" type="number" min="0" className="field text-ink" /></div>
+              <div><label className={lbl}>Size</label><input name="areaValue" type="number" min="0" step="any" className="field text-ink" placeholder="1100" /></div>
+              <div>
+                <label className={lbl}>Unit</label>
+                <select name="areaUnit" className="field text-ink" defaultValue="SQFT">{AREA_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}</select>
+              </div>
+              <div className="sm:col-span-3"><label className={lbl}>Base price (PKR)</label><input name="basePrice" type="number" min="0" className="field text-ink" placeholder="20000000" required /></div>
+              <div className="sm:col-span-3"><label className={lbl}>Floor rise / floor</label><input name="floorRise" type="number" min="0" className="field text-ink" placeholder="0" /></div>
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="label" htmlFor="t-base">Base price (PKR)</label>
-              <input id="t-base" name="basePrice" type="number" min="0" className="field" required />
+
+          <div>
+            <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-muted">Placement <span className="normal-case text-muted">(optional — fill in to generate units now)</span></p>
+            <div className="grid grid-cols-2 gap-x-2 gap-y-2.5 sm:grid-cols-4">
+              <div><label className={lbl}>Tower / block</label><input name="tower" className="field text-ink" placeholder="A" /></div>
+              <div><label className={lbl}>Floor from</label><input name="floorFrom" type="number" className="field text-ink" value={pFrom} onChange={(e) => setPFrom(e.target.value)} /></div>
+              <div><label className={lbl}>Floor to</label><input name="floorTo" type="number" className="field text-ink" value={pTo} onChange={(e) => setPTo(e.target.value)} /></div>
+              <div><label className={lbl}>Units / floor</label><input name="unitsPerFloor" type="number" min="1" className="field text-ink" value={pPer} onChange={(e) => setPPer(e.target.value)} /></div>
             </div>
-            <div>
-              <label className="label" htmlFor="t-rise">Floor rise / floor</label>
-              <input id="t-rise" name="floorRise" type="number" min="0" className="field" placeholder="0" />
-            </div>
+            <p className="mt-1.5 text-xs text-muted">
+              {placeCount > 0
+                ? <span className="font-medium text-accent">{placeCount} unit(s) will be generated</span>
+                : (totalFloors ? `Apartments go on floors ${apartFrom}–${totalFloors}. Leave blank to add the type without units.` : "Leave placement blank to add the type without generating units.")}
+            </p>
           </div>
-          <div className="flex justify-end gap-2 pt-1">
+
+          <div className="flex justify-end gap-2 border-t border-line pt-3">
             <button type="button" onClick={() => setTypeOpen(false)} className="btn-ghost">Cancel</button>
-            <button type="submit" disabled={typePending} className="btn-accent">{typePending ? "Saving…" : "Add type"}</button>
+            <button type="submit" disabled={typePending} className="btn-accent">{typePending ? "Saving…" : placeCount > 0 ? `Add + generate ${placeCount}` : "Add unit type"}</button>
           </div>
         </form>
       </Drawer>

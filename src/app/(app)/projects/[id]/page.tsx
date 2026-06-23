@@ -83,7 +83,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
               isOffPlan: project.isOffPlan, launchDate: isoDate(project.launchDate), completionDate: isoDate(project.completionDate),
               amenities: project.amenities, description: project.description ?? "",
             }} />
-            <ProjectManage projectId={project.id} status={project.status} unitTypes={unitTypes.map((t) => ({ id: t.id, name: t.name }))} hasTypes={unitTypes.length > 0} dealers={dealers} towers={towers} />
+            <ProjectManage projectId={project.id} status={project.status} unitTypes={unitTypes.map((t) => ({ id: t.id, name: t.name }))} hasTypes={unitTypes.length > 0} dealers={dealers} towers={towers} totalFloors={project.totalFloors} parkingFloors={project.parkingFloors} />
           </div>
         ) : null}
       />
