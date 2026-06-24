@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { requireCapability } from "@/lib/session";
 import { financeOverview } from "@/lib/finance";
-import { money, fmtDate } from "@/lib/format";
+import { money, compactMoney, fmtDate } from "@/lib/format";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Section } from "@/components/ui/Section";
 import { StatCard } from "@/components/ui/StatCard";
@@ -18,10 +18,10 @@ export default async function FinancePage() {
       <PageHeader eyebrow="Money" title="Finance dashboard" subtitle="Collections, what's due, what's overdue, and every deal's payment standing." />
 
       <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <StatCard label="Collected" value={money(fin.collected)} tone="ok" sub={`${fin.counts.paid} payments`} />
-        <StatCard label="Collected this month" value={money(fin.collectedThisMonth)} tone="accent" />
-        <StatCard label="Outstanding" value={money(fin.outstanding)} tone="ink" sub={`${fin.counts.outstanding} due`} />
-        <StatCard label="Overdue" value={money(fin.overdue)} tone="danger" sub={fin.counts.overdue ? `${fin.counts.overdue} payments` : "all on track"} />
+        <StatCard label="Collected" value={compactMoney(fin.collected)} tone="ok" sub={`${fin.counts.paid} payments`} />
+        <StatCard label="This month" value={compactMoney(fin.collectedThisMonth)} tone="accent" />
+        <StatCard label="Outstanding" value={compactMoney(fin.outstanding)} tone="ink" sub={`${fin.counts.outstanding} due`} />
+        <StatCard label="Overdue" value={compactMoney(fin.overdue)} tone="danger" sub={fin.counts.overdue ? `${fin.counts.overdue} payments` : "all on track"} />
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">

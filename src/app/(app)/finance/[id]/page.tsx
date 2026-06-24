@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireCapability } from "@/lib/session";
 import { dealPaymentProfile } from "@/lib/finance";
-import { money, fmtDate, humanize } from "@/lib/format";
+import { money, compactMoney, fmtDate, humanize } from "@/lib/format";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Section } from "@/components/ui/Section";
 import { StatCard } from "@/components/ui/StatCard";
@@ -34,10 +34,10 @@ export default async function PaymentProfilePage({ params }: { params: Promise<{
 
       {/* Standing */}
       <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <StatCard label="Contract value" value={money(total)} tone="ink" />
-        <StatCard label="Collected" value={money(paid)} tone="ok" sub={`${pct}% paid`} />
-        <StatCard label="Outstanding" value={money(outstanding)} tone="accent" />
-        <StatCard label="Overdue" value={money(overdue)} tone={overdue > 0 ? "danger" : "default"} />
+        <StatCard label="Contract value" value={compactMoney(total)} tone="ink" />
+        <StatCard label="Collected" value={compactMoney(paid)} tone="ok" sub={`${pct}% paid`} />
+        <StatCard label="Outstanding" value={compactMoney(outstanding)} tone="accent" />
+        <StatCard label="Overdue" value={compactMoney(overdue)} tone={overdue > 0 ? "danger" : "default"} />
       </div>
 
       {/* Progress + next due */}
