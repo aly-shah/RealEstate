@@ -13,6 +13,7 @@ import { StatusBadge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ProjectManage } from "./ProjectManage";
 import { EditProject } from "./EditProject";
+import { UnitActions } from "./UnitActions";
 
 const isoDate = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : "");
 
@@ -159,7 +160,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
         {units.length === 0 ? (
           <EmptyState title="No units yet" hint={canManage ? "Use “Generate units” to create the inventory." : "No units have been generated yet."} />
         ) : (
-          <Table head={["Unit", "Tower", "Floor", "Type", "Dealer", "Price", "Status"]}>
+          <Table head={["Unit", "Tower", "Floor", "Type", "Dealer", "Price", "Status", ...(canManage ? [""] : [])]}>
             {units.map((u) => (
               <tr key={u.id} className="hover:bg-line-soft">
                 <Td><Link href={`/properties/${u.id}`} className="font-semibold text-ink hover:text-accent">{u.reference}</Link></Td>
@@ -169,6 +170,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
                 <Td className="text-muted">{u.dealer?.name ?? "—"}</Td>
                 <Td className="font-medium">{u.salePrice != null ? money(u.salePrice) : "—"}</Td>
                 <Td><StatusBadge status={u.status} /></Td>
+                {canManage && <Td><UnitActions unit={{ id: u.id, reference: u.reference, salePrice: toNumber(u.salePrice), status: u.status }} /></Td>}
               </tr>
             ))}
           </Table>

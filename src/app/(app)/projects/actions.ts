@@ -430,6 +430,64 @@ export async function generateUnits(_prev: FormState, formData: FormData): Promi
   return count === total ? {} : { error: count === 0 ? "Those units already exist." : `Created ${count} new unit(s); the rest already existed.` };
 }
 
+/* ───────────────────────────── Edit / delete a single unit ─────────────────── */
+
+const UNIT_STATUSES = ["AVAILABLE", "RESERVED", "SOLD", "INACTIVE"] as const;
+
+const updateUnitSchema = z.object({
+  unitId: z.string().min(1),
+  salePrice: z.coerce.number().min(0),
+  status: z.enum(UNIT_STATUSES),
+});
+
+export type UnitResult = { ok: true } | { ok: false; error: string };
+
+/** Quick-edit a unit's price + status from the project inventory table. */
+export async function updateUnit(input: z.infer<typeof updateUnitSchema>): Promise<UnitResult> {
+  const { user, allowed } = await requireInventoryManager();
+  if (!allowed) return { ok: false, error: "Not allowed." };
+
+  const parsed = updateUnitSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input." };
+  const d = parsed.data;
+
+  const unit = await prisma.property.findFirst({ where: { id: d.unitId, companyId: user.companyId, projectId: { not: null } }, select: { id: true, projectId: true } });
+  if (!unit) return { ok: false, error: "Unit not found." };
+
+  await prisma.property.update({
+    where: { id: unit.id },
+    data: { salePrice: new Prisma.Decimal(d.salePrice), status: d.status, version: { increment: 1 } },
+  });
+  await logActivity({ companyId: user.companyId, userId: user.id, action: "unit.updated", entityType: "PROPERTY", entityId: unit.id, summary: `Updated unit` });
+  if (unit.projectId) revalidatePath(`/projects/${unit.projectId}`);
+  return { ok: true };
+}
+
+/** Delete a unit. Only AVAILABLE units with no deal can be removed (a sold/
+ *  reserved unit is part of a transaction and must be kept). */
+export async function deleteUnit(unitId: string): Promise<UnitResult> {
+  const { user, allowed } = await requireInventoryManager();
+  if (!allowed) return { ok: false, error: "Not allowed." };
+
+  const unit = await prisma.property.findFirst({
+    where: { id: unitId, companyId: user.companyId, projectId: { not: null } },
+    select: { id: true, projectId: true, reference: true, status: true, _count: { select: { deals: true } } },
+  });
+  if (!unit) return { ok: false, error: "Unit not found." };
+  if (unit.status !== "AVAILABLE") return { ok: false, error: "Only available units can be deleted — this one is reserved or sold." };
+  if (unit._count.deals > 0) return { ok: false, error: "This unit has a deal on record and can't be deleted." };
+
+  try {
+    // Any stray (pre-reservation) bookings cascade with the property.
+    await prisma.property.delete({ where: { id: unit.id } });
+  } catch {
+    return { ok: false, error: "This unit is referenced elsewhere and can't be deleted." };
+  }
+  await logActivity({ companyId: user.companyId, userId: user.id, action: "unit.deleted", entityType: "PROPERTY", entityId: unit.projectId, summary: `Deleted unit ${unit.reference}` });
+  if (unit.projectId) revalidatePath(`/projects/${unit.projectId}`);
+  return { ok: true };
+}
+
 /* ───────────────────────────── Create-project wizard ───────────────────────── */
 
 const AREA_UNITS = ["SQFT", "SQM", "SQYD", "MARLA", "KANAL"] as const;
