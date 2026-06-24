@@ -14,7 +14,8 @@ test("localizeDigits maps ASCII to Urdu digits when locale=ur", () => {
   assert.equal(localizeDigits("2026", "en"), "2026");
 });
 
-test("compactMoney returns M/K suffix in en", () => {
+test("compactMoney returns B/M/K suffix in en", () => {
+  assert.match(compactMoney(1_263_700_000, "en"), /^PKR 1\.26B$/);
   assert.match(compactMoney(15_000_000, "en"), /^PKR 15\.00M$/);
   assert.match(compactMoney(2_500, "en"), /^PKR 2\.5K$/);
 });

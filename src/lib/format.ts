@@ -31,6 +31,7 @@ export function money(value: Decimalish, locale: Locale = "en"): string {
 export function compactMoney(value: Decimalish, locale: Locale = "en"): string {
   const n = toNumber(value);
   const suffix = (() => {
+    if (n >= 1_000_000_000) return { num: (n / 1_000_000_000).toFixed(2), unit: "B" } as const;
     if (n >= 1_000_000) return { num: (n / 1_000_000).toFixed(2), unit: "M" } as const;
     if (n >= 1_000) return { num: (n / 1_000).toFixed(1), unit: "K" } as const;
     return null;
