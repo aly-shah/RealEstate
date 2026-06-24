@@ -698,3 +698,81 @@ export async function aiProjectDescription(input: {
   if (!res.ok) return { ok: false, reason: res.reason };
   return { ok: true, description: res.description };
 }
+
+/* ───────────────────────────── Media (project + units) ────────────────────── */
+
+export interface MediaItem { id: string; kind: string; url: string; caption: string | null }
+
+const mediaSchema = z.object({
+  kind: z.enum(["PHOTO", "FLOOR_PLAN", "BROCHURE", "VIDEO"]).default("PHOTO"),
+  url: z.string().min(1, "Upload a file first."),
+  caption: z.string().optional(),
+});
+type MediaResult = { ok: true; media: MediaItem } | { ok: false; error: string };
+
+/** Add a photo / floor plan / brochure to the project. */
+export async function addProjectMedia(input: { projectId: string; kind: string; url: string; caption?: string }): Promise<MediaResult> {
+  const { user, allowed } = await requireInventoryManager();
+  if (!allowed) return { ok: false, error: "Not allowed." };
+  const parsed = mediaSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input." };
+
+  const proj = await prisma.project.findFirst({ where: { id: input.projectId, companyId: user.companyId }, select: { id: true } });
+  if (!proj) return { ok: false, error: "Project not found." };
+
+  const m = await prisma.projectMedia.create({
+    data: { companyId: user.companyId, projectId: proj.id, kind: parsed.data.kind, url: parsed.data.url, caption: parsed.data.caption?.trim() || null },
+    select: { id: true, kind: true, url: true, caption: true },
+  });
+  revalidatePath(`/projects/${proj.id}`);
+  return { ok: true, media: m };
+}
+
+export async function deleteProjectMedia(mediaId: string): Promise<{ ok: boolean; error?: string }> {
+  const { user, allowed } = await requireInventoryManager();
+  if (!allowed) return { ok: false, error: "Not allowed." };
+  const m = await prisma.projectMedia.findFirst({ where: { id: mediaId, companyId: user.companyId }, select: { id: true, projectId: true } });
+  if (!m) return { ok: false, error: "Not found." };
+  await prisma.projectMedia.delete({ where: { id: m.id } });
+  revalidatePath(`/projects/${m.projectId}`);
+  return { ok: true };
+}
+
+/** A unit's photos / floor plans (lazy-loaded by the unit edit drawer). */
+export async function unitMedia(unitId: string): Promise<MediaItem[]> {
+  const { user, allowed } = await requireInventoryManager();
+  if (!allowed) return [];
+  const rows = await prisma.propertyMedia.findMany({
+    where: { propertyId: unitId, property: { companyId: user.companyId } },
+    orderBy: { createdAt: "asc" },
+    select: { id: true, kind: true, url: true, caption: true },
+  });
+  return rows;
+}
+
+/** Add a photo / floor plan to a unit. */
+export async function addUnitMedia(input: { unitId: string; kind: string; url: string; caption?: string }): Promise<MediaResult> {
+  const { user, allowed } = await requireInventoryManager();
+  if (!allowed) return { ok: false, error: "Not allowed." };
+  const parsed = mediaSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input." };
+
+  const unit = await prisma.property.findFirst({ where: { id: input.unitId, companyId: user.companyId }, select: { id: true, projectId: true } });
+  if (!unit) return { ok: false, error: "Unit not found." };
+
+  const m = await prisma.propertyMedia.create({
+    data: { propertyId: unit.id, kind: parsed.data.kind, url: parsed.data.url, caption: parsed.data.caption?.trim() || null },
+    select: { id: true, kind: true, url: true, caption: true },
+  });
+  if (unit.projectId) revalidatePath(`/projects/${unit.projectId}`);
+  return { ok: true, media: m };
+}
+
+export async function deleteUnitMedia(mediaId: string): Promise<{ ok: boolean; error?: string }> {
+  const { user, allowed } = await requireInventoryManager();
+  if (!allowed) return { ok: false, error: "Not allowed." };
+  const m = await prisma.propertyMedia.findFirst({ where: { id: mediaId, property: { companyId: user.companyId } }, select: { id: true } });
+  if (!m) return { ok: false, error: "Not found." };
+  await prisma.propertyMedia.delete({ where: { id: m.id } });
+  return { ok: true };
+}

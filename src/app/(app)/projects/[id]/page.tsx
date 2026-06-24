@@ -14,6 +14,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { ProjectManage } from "./ProjectManage";
 import { EditProject } from "./EditProject";
 import { UnitActions } from "./UnitActions";
+import { ProjectMediaManager } from "./ProjectMediaManager";
 
 const isoDate = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : "");
 
@@ -29,6 +30,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
     select: {
       id: true, name: true, city: true, area: true, status: true, isOffPlan: true, description: true,
       address: true, latitude: true, longitude: true, totalFloors: true, parkingFloors: true, launchDate: true, completionDate: true, amenities: true,
+      media: { orderBy: { createdAt: "asc" }, select: { id: true, kind: true, url: true, caption: true } },
     },
   });
   if (!project) notFound();
@@ -131,6 +133,13 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
               </div>
             )}
           </div>
+        </Section>
+      )}
+
+      {/* Media */}
+      {canManage && (
+        <Section title="Media — photos, floor plans & brochures" className="mb-6">
+          <ProjectMediaManager projectId={project.id} items={project.media} />
         </Section>
       )}
 
