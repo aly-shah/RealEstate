@@ -5,7 +5,7 @@ import { requireCompanyUser } from "@/lib/session";
 import { isScopedToSelf } from "@/lib/session";
 import { commissionTotals } from "@/lib/metrics";
 import { companyCommissionForecast, agentCommissionForecast } from "@/lib/commissions/forecast";
-import { money, fmtDate, toNumber } from "@/lib/format";
+import { money, compactMoney, fmtDate, toNumber } from "@/lib/format";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Table, Td } from "@/components/ui/Table";
 import { StatusBadge } from "@/components/ui/Badge";
@@ -49,9 +49,9 @@ export default async function CommissionsPage() {
 
       {totals && (
         <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-3">
-          <StatCard label="Total commission" value={money(totals.total)} tone="ink" />
-          <StatCard label="Paid" value={money(totals.paid)} tone="accent" />
-          <StatCard label="Pending" value={money(totals.pending)} />
+          <StatCard label="Total commission" value={compactMoney(totals.total)} tone="ink" />
+          <StatCard label="Paid" value={compactMoney(totals.paid)} tone="accent" />
+          <StatCard label="Pending" value={compactMoney(totals.pending)} />
         </div>
       )}
 

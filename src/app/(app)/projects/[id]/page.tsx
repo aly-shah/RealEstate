@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { requireCompanyUser } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { can } from "@/lib/rbac";
-import { money, toNumber, humanize, fmtDate } from "@/lib/format";
+import { money, compactMoney, toNumber, humanize, fmtDate } from "@/lib/format";
 import { MapView, type MapMarker } from "@/components/map/MapView";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Section } from "@/components/ui/Section";
@@ -93,8 +93,8 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
         <StatCard label="Available" value={available} tone="ok" />
         <StatCard label="Reserved" value={reserved} tone="gold" />
         <StatCard label="Sold" value={sold} tone="accent" sub={total ? `${Math.round((sold / total) * 100)}% of inventory` : undefined} />
-        <StatCard label="Gross inventory value" value={money(gross)} tone="ink" />
-        <StatCard label="Sold value" value={money(soldValue)} tone="accent" />
+        <StatCard label="Gross inventory value" value={compactMoney(gross)} tone="ink" />
+        <StatCard label="Sold value" value={compactMoney(soldValue)} tone="accent" />
       </div>
 
       {/* Overview */}

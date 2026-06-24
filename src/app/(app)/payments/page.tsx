@@ -1,7 +1,7 @@
 import { requireCapability } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { outstandingPayments } from "@/lib/metrics";
-import { money, fmtDate, humanize } from "@/lib/format";
+import { money, compactMoney, fmtDate, humanize } from "@/lib/format";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Table, Td } from "@/components/ui/Table";
 import { StatCard } from "@/components/ui/StatCard";
@@ -57,9 +57,9 @@ export default async function PaymentsPage({
       <PageHeader eyebrow="Money" title="Payments & receipts" subtitle="What's come in, what's due, and what's overdue." />
 
       <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-3">
-        <StatCard label="Collected" value={money(collected)} tone="ink" />
-        <StatCard label="Due" value={money(totals.due)} tone="accent" />
-        <StatCard label="Overdue" value={money(totals.overdue)} />
+        <StatCard label="Collected" value={compactMoney(collected)} tone="ink" />
+        <StatCard label="Due" value={compactMoney(totals.due)} tone="accent" />
+        <StatCard label="Overdue" value={compactMoney(totals.overdue)} />
       </div>
 
       <PaymentForm deals={deals} invoices={invoiceOptions} />
