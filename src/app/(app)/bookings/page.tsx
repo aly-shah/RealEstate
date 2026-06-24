@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { requireCompanyUser, isScopedToSelf } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { can } from "@/lib/rbac";
@@ -37,7 +38,7 @@ export default async function BookingsPage() {
     take: 200,
     select: {
       id: true, status: true, price: true, discount: true, clientName: true, clientId: true,
-      dealerId: true, bookedById: true, version: true, createdAt: true,
+      dealerId: true, dealId: true, bookedById: true, version: true, createdAt: true,
       property: { select: { reference: true, project: { select: { name: true } } } },
     },
   });
@@ -90,7 +91,13 @@ export default async function BookingsPage() {
               <Td><Badge tone={STATUS_TONE[b.status] ?? "neutral"}>{b.status}</Badge></Td>
               <Td className="text-xs text-muted">{fmtDate(b.createdAt)}</Td>
               {office && (
-                <Td>{b.status === "PENDING" ? <BookingActions bookingId={b.id} /> : <span className="text-xs text-muted">—</span>}</Td>
+                <Td>
+                  {b.status === "PENDING"
+                    ? <BookingActions bookingId={b.id} />
+                    : b.dealId
+                      ? <Link href={`/finance/${b.dealId}`} className="whitespace-nowrap text-xs font-semibold text-accent">Payments →</Link>
+                      : <span className="text-xs text-muted">—</span>}
+                </Td>
               )}
             </tr>
           ))}

@@ -162,7 +162,7 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
 
           <Section
             title="Payments"
-            action={office ? <span className="text-xs text-muted">{deal.payments.length} records</span> : null}
+            action={office ? <Link href={`/finance/${deal.id}`} className="text-xs font-semibold text-accent">Payment profile →</Link> : null}
           >
             {deal.payments.length === 0 ? (
               <p className="mb-3 text-sm text-muted">No payments recorded.</p>

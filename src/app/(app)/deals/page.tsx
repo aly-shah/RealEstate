@@ -62,7 +62,7 @@ export default async function DealsPage({
         <EmptyState title="No deals yet" hint="Record a deal when a property is sold or rented." />
       ) : (
         <>
-          <Table head={["Reference", "Type", "Property", "Client", "Value", "Status", "Closed"]}>
+          <Table head={["Reference", "Type", "Property", "Client", "Value", "Status", "Closed", ...(can(user.role, "managePayments") ? [""] : [])]}>
             {deals.map((d) => (
               <tr key={d.id} className="hover:bg-line-soft">
                 <Td><Link href={`/deals/${d.id}`} className="font-semibold text-ink hover:text-accent">{d.reference}</Link></Td>
@@ -72,6 +72,7 @@ export default async function DealsPage({
                 <Td className="whitespace-nowrap font-medium">{compactMoney(d.sale?.salePrice ?? d.rental?.monthlyRent)}{d.rental ? "/mo" : ""}</Td>
                 <Td><StatusBadge status={d.status} /></Td>
                 <Td className="text-xs text-muted">{fmtDate(d.closeDate)}</Td>
+                {can(user.role, "managePayments") && <Td><Link href={`/finance/${d.id}`} className="whitespace-nowrap text-xs font-semibold text-accent">Payments →</Link></Td>}
               </tr>
             ))}
           </Table>
