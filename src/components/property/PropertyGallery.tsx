@@ -14,7 +14,12 @@ export interface MediaItem {
 }
 
 const KINDS = ["PHOTO", "VIDEO", "FLOOR_PLAN", "BROCHURE"];
-const isImage = (url: string) => /\.(jpe?g|png|webp|gif|avif)$/i.test(url);
+// PHOTO/FLOOR_PLAN are always images; also sniff the extension for anything
+// else (and so remote URLs without an extension — e.g. an image CDN — that are
+// tagged as photos still render inline rather than as a file icon).
+const isImageUrl = (url: string) => /\.(jpe?g|png|webp|gif|avif)$/i.test(url);
+const showAsImage = (kind: string, url: string) =>
+  kind === "PHOTO" || kind === "FLOOR_PLAN" || isImageUrl(url);
 
 export function PropertyGallery({
   propertyId,
@@ -40,7 +45,7 @@ export function PropertyGallery({
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
           {media.map((m) => (
             <div key={m.id} className="group relative overflow-hidden rounded-md border border-line bg-line-soft">
-              {isImage(m.url) ? (
+              {showAsImage(m.kind, m.url) ? (
                 /* eslint-disable-next-line @next/next/no-img-element */
                 <img src={m.url} alt={m.caption ?? "Property media"} className="aspect-[4/3] w-full object-cover" />
               ) : (

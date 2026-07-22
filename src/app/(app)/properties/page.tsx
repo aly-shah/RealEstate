@@ -16,8 +16,9 @@ import { SavedViews } from "@/components/ui/SavedViews";
 import { QuickShareButton } from "@/components/property/QuickShareButton";
 import { AddPropertyDrawer } from "@/components/property/AddPropertyDrawer";
 import { PK_CITIES } from "@/lib/pk-areas";
+import { ALL_PROPERTY_TYPES } from "@/lib/property-types";
 
-const TYPES = ["RESIDENTIAL", "COMMERCIAL", "PLOT", "APARTMENT", "VILLA", "SHOP", "OFFICE"] as const;
+const TYPES = ALL_PROPERTY_TYPES;
 const STATUSES = ["AVAILABLE", "RESERVED", "UNDER_NEGOTIATION", "RENTED", "SOLD", "INACTIVE", "PENDING_VERIFICATION"] as const;
 
 export default async function PropertiesPage({

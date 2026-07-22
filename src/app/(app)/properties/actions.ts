@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
-import { Prisma } from "@prisma/client";
+import { Prisma, type PropertyType } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireCompanyUser } from "@/lib/session";
 import { can } from "@/lib/rbac";
@@ -14,6 +14,8 @@ import { nextPropertyReference } from "@/lib/refs";
 import { setFlash } from "@/lib/flash";
 import { canAddProperty } from "@/lib/plans";
 import { newShareSlug } from "@/lib/share";
+import { AMENITIES as AMENITY_OPTIONS } from "@/lib/amenities";
+import { ALL_PROPERTY_TYPES } from "@/lib/property-types";
 import { casUpdateGuarded } from "@/lib/concurrency";
 import { alertAgentsOfNewListing } from "@/lib/lead-matching";
 import { generatePropertyCopy } from "@/lib/ai/handlers/property-copy";
@@ -26,7 +28,7 @@ const optInt = z.preprocess((v) => (v === "" || v == null ? undefined : v), z.co
 
 const propertySchema = z.object({
   title: z.string().min(2, "Title is required"),
-  type: z.enum(["RESIDENTIAL", "COMMERCIAL", "PLOT", "APARTMENT", "VILLA", "SHOP", "OFFICE"]),
+  type: z.enum(ALL_PROPERTY_TYPES as [string, ...string[]]),
   listingType: z.enum(["SALE", "RENT", "BOTH"]),
   status: z.enum(["AVAILABLE", "RESERVED", "UNDER_NEGOTIATION", "RENTED", "SOLD", "INACTIVE", "PENDING_VERIFICATION"]),
   city: z.string().optional(),
@@ -53,12 +55,7 @@ const propertySchema = z.object({
   ownerPhone: z.string().optional(),
 });
 
-const AMENITIES = new Set([
-  "Parking", "Lift / Elevator", "Backup Generator", "Security / Guard", "CCTV",
-  "Servant Quarter", "Gym", "Swimming Pool", "Garden / Lawn", "Mosque Nearby",
-  "Furnished", "Gas Connection", "Solar Panels", "Boundary Wall", "Corner",
-  "Park Facing", "Main Road", "Water Boring",
-]);
+const AMENITIES: Set<string> = new Set(AMENITY_OPTIONS);
 
 export type FormState = { error?: string; ok?: boolean; fieldErrors?: Record<string, string[]> };
 
@@ -98,7 +95,7 @@ export async function createProperty(_prev: FormState, formData: FormData): Prom
   const dataBase = {
     companyId: user.companyId,
     title: d.title,
-    type: d.type,
+    type: d.type as PropertyType,
     listingType: d.listingType,
     status: d.status,
     city: d.city || null,
@@ -122,6 +119,13 @@ export async function createProperty(_prev: FormState, formData: FormData): Prom
     dealerId: d.dealerId || null,
     ownerName: d.ownerName || null,
     ownerPhone: d.ownerPhone || null,
+    // Every listing gets a public share page from birth — the slug is minted
+    // here so the agent never has to "turn sharing on"; the Share button on the
+    // detail page just copies/sends this link. shareEnabled stays a kill-switch
+    // (default true) so a listing can still be pulled offline if ever needed.
+    shareSlug: newShareSlug(),
+    shareEnabled: true,
+    sharedById: user.id,
     agents: user.role === "AGENT" ? { create: [{ agentId: user.id }] } : undefined,
   };
 
@@ -200,7 +204,7 @@ export async function updateProperty(_prev: FormState, formData: FormData): Prom
 
   const data = {
     title: d.title,
-    type: d.type,
+    type: d.type as PropertyType,
     listingType: d.listingType,
     status: d.status,
     city: d.city || null,
@@ -328,6 +332,47 @@ export async function addPropertyMedia(_prev: FormState, formData: FormData): Pr
   });
 
   revalidatePath(`/properties/${d.propertyId}`);
+  return { ok: true };
+}
+
+/**
+ * Set a property's amenities from the standalone editor on the detail page —
+ * a focused alternative to opening the full edit form just to tick amenity
+ * chips. Validates against the shared allow-list, then revalidates both the
+ * detail page and the public share page so the new amenities show immediately.
+ */
+export async function setPropertyAmenities(_prev: FormState, formData: FormData): Promise<FormState> {
+  const user = await requireCompanyUser();
+  if (!can(user.role, "manageProperties")) return { error: "Not allowed." };
+
+  const id = String(formData.get("propertyId"));
+  const amenities = [
+    ...new Set(
+      String(formData.get("amenities") || "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => AMENITIES.has(s)),
+    ),
+  ];
+
+  const property = await prisma.property.findFirst({
+    where: { id, companyId: user.companyId },
+    select: { id: true, reference: true, shareSlug: true },
+  });
+  if (!property) return { error: "Property not found." };
+
+  await prisma.property.update({ where: { id }, data: { amenities } });
+  await logActivity({
+    companyId: user.companyId,
+    userId: user.id,
+    action: "property.amenities_updated",
+    entityType: "PROPERTY",
+    entityId: id,
+    summary: `Updated amenities for ${property.reference} (${amenities.length})`,
+  });
+
+  revalidatePath(`/properties/${id}`);
+  if (property.shareSlug) revalidatePath(`/p/${property.shareSlug}`);
   return { ok: true };
 }
 

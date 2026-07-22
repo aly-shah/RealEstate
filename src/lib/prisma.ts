@@ -19,7 +19,17 @@ const TENANT_LIST_MODELS = new Set([
 ]);
 const LIST_OP = /^(findMany|count|aggregate|groupBy)$/;
 
-const unscopedCtx = new AsyncLocalStorage<{ reason: string }>();
+// Pinned to globalThis for the same reason `prisma` is (below): Next's dev
+// bundler can evaluate this module in more than one layer (rsc / ssr / HMR).
+// If each copy had its own AsyncLocalStorage, `runUnscoped` would set the store
+// on one instance while the guard hook read another — `getStore()` would miss
+// and the opt-out would silently fail. One shared instance keeps them in sync.
+const globalForCtx = globalThis as unknown as {
+  unscopedCtx: AsyncLocalStorage<{ reason: string }> | undefined;
+};
+const unscopedCtx =
+  globalForCtx.unscopedCtx ?? new AsyncLocalStorage<{ reason: string }>();
+globalForCtx.unscopedCtx = unscopedCtx;
 
 /**
  * Marks a block as intentionally NOT company-scoped so the tenant guard skips it.

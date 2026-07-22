@@ -6,10 +6,10 @@ import { createProperty, updateProperty, suggestPropertyCopy, type FormState } f
 import { humanize } from "@/lib/format";
 import { CityAreaPicker } from "@/components/ui/CityAreaPicker";
 import { AddressAutocomplete } from "@/components/ui/AddressAutocomplete";
+import { PROPERTY_TYPE_GROUPS, isLandType, isResidentialType } from "@/lib/property-types";
+import { AMENITY_GROUPS } from "@/lib/amenities";
 
-const TYPES = ["APARTMENT", "VILLA", "RESIDENTIAL", "COMMERCIAL", "PLOT", "SHOP", "OFFICE"];
 const STATUSES = ["AVAILABLE", "PENDING_VERIFICATION", "RESERVED", "UNDER_NEGOTIATION", "RENTED", "SOLD", "INACTIVE"];
-const RESIDENTIAL_TYPES = new Set(["APARTMENT", "VILLA", "RESIDENTIAL"]);
 
 const PURPOSE_OPTS = [
   { value: "SALE", label: "Sale" },
@@ -22,13 +22,6 @@ const UNIT_OPTS = [
   { value: "MARLA", label: "Marla" },
   { value: "KANAL", label: "Kanal" },
   { value: "SQM", label: "Sq.m" },
-];
-// Must mirror the AMENITIES allow-list in properties/actions.ts.
-const AMENITIES = [
-  "Parking", "Lift / Elevator", "Backup Generator", "Security / Guard", "CCTV",
-  "Servant Quarter", "Gym", "Swimming Pool", "Garden / Lawn", "Mosque Nearby",
-  "Furnished", "Gas Connection", "Solar Panels", "Boundary Wall", "Corner",
-  "Park Facing", "Main Road", "Water Boring",
 ];
 
 /** Initial values for edit mode — what the property page already has on record.
@@ -158,7 +151,7 @@ export function PropertyForm({ dealers, canPickDealer, onCancel, property }: Pro
     {},
   );
   const [listingType, setListingType] = useState(property?.listingType ?? "SALE");
-  const [type, setType] = useState(property?.type ?? "APARTMENT");
+  const [type, setType] = useState(property?.type ?? "HOUSE");
   const [areaUnit, setAreaUnit] = useState(property?.areaUnit ?? "SQFT");
   const [bedrooms, setBedrooms] = useState(property?.bedrooms ?? 0);
   const [bathrooms, setBathrooms] = useState(property?.bathrooms ?? 0);
@@ -179,8 +172,12 @@ export function PropertyForm({ dealers, canPickDealer, onCancel, property }: Pro
 
   const showSale = listingType === "SALE" || listingType === "BOTH";
   const showRent = listingType === "RENT" || listingType === "BOTH";
-  const isLand = type === "PLOT";
-  const isResidential = RESIDENTIAL_TYPES.has(type);
+  const isLand = isLandType(type);
+  const isResidential = isResidentialType(type);
+  // Back-compat: if this listing's stored type predates the granular taxonomy
+  // (e.g. "APARTMENT"), it won't be in the grouped options — surface it as its
+  // own option so the select still shows the right value in edit mode.
+  const knownType = PROPERTY_TYPE_GROUPS.some((g) => g.items.some((i) => i.value === type));
 
   const toggleAmenity = (a: string) =>
     setAmenities((prev) => (prev.includes(a) ? prev.filter((x) => x !== a) : [...prev, a]));
@@ -247,7 +244,12 @@ export function PropertyForm({ dealers, canPickDealer, onCancel, property }: Pro
           <div>
             <label className="label" htmlFor="type">Type</label>
             <select id="type" name="type" className="field" value={type} onChange={(e) => setType(e.target.value)}>
-              {TYPES.map((t) => <option key={t} value={t}>{humanize(t)}</option>)}
+              {!knownType && <option value={type}>{humanize(type)}</option>}
+              {PROPERTY_TYPE_GROUPS.map((g) => (
+                <optgroup key={g.category} label={g.category}>
+                  {g.items.map((i) => <option key={i.value} value={i.value}>{i.label}</option>)}
+                </optgroup>
+              ))}
             </select>
           </div>
           <div>
@@ -321,27 +323,34 @@ export function PropertyForm({ dealers, canPickDealer, onCancel, property }: Pro
       </section>
 
       <section className="border-t border-line pt-5">
-        <SectionTitle>Amenities</SectionTitle>
-        <div className="flex flex-wrap gap-2">
-          {AMENITIES.map((a) => {
-            const on = amenities.includes(a);
-            return (
-              <button
-                key={a}
-                type="button"
-                onClick={() => toggleAmenity(a)}
-                aria-pressed={on}
-                className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${
-                  on ? "border-accent bg-accent/10 text-accent" : "border-line bg-paper text-muted hover:border-accent/40 hover:text-ink"
-                }`}
-              >
-                {on ? "✓ " : ""}{a}
-              </button>
-            );
-          })}
+        <SectionTitle>Features &amp; amenities</SectionTitle>
+        <div className="space-y-4">
+          {AMENITY_GROUPS.map((group) => (
+            <div key={group.category}>
+              <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted/80">{group.category}</p>
+              <div className="flex flex-wrap gap-2">
+                {group.items.map((a) => {
+                  const on = amenities.includes(a);
+                  return (
+                    <button
+                      key={a}
+                      type="button"
+                      onClick={() => toggleAmenity(a)}
+                      aria-pressed={on}
+                      className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${
+                        on ? "border-accent bg-accent/10 text-accent" : "border-line bg-paper text-muted hover:border-accent/40 hover:text-ink"
+                      }`}
+                    >
+                      {on ? "✓ " : ""}{a}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
         </div>
         <input type="hidden" name="amenities" value={amenities.join(",")} />
-        {amenities.length > 0 && <p className="mt-2 text-xs text-muted">{amenities.length} selected</p>}
+        {amenities.length > 0 && <p className="mt-3 text-xs text-muted">{amenities.length} selected</p>}
       </section>
 
       <section className="border-t border-line pt-5">

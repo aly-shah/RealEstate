@@ -56,13 +56,34 @@ enum BillingStatus {
 }
 
 enum PropertyType {
+  // Legacy coarse types (kept so pre-existing listings still load/edit)
   RESIDENTIAL
   COMMERCIAL
   PLOT
   APARTMENT
+  // Home
+  HOUSE
+  FLAT
+  UPPER_PORTION
+  LOWER_PORTION
+  FARM_HOUSE
+  ROOM
+  PENTHOUSE
   VILLA
+  // Plots
+  RESIDENTIAL_PLOT
+  COMMERCIAL_PLOT
+  AGRICULTURAL_LAND
+  INDUSTRIAL_LAND
+  PLOT_FILE
+  PLOT_FORM
+  // Commercial
   SHOP
   OFFICE
+  WAREHOUSE
+  FACTORY
+  BUILDING
+  OTHER
 }
 
 // Area units common in the Pakistan real-estate market. MARLA + KANAL are the
@@ -712,7 +733,7 @@ model Property {
   // enumerate other listings. shareEnabled lets the agent revoke access without
   // losing the URL; sharedById is the agent shown to the client as the contact.
   shareSlug    String? @unique
-  shareEnabled Boolean @default(false)
+  shareEnabled Boolean @default(true)
   sharedById   String?
 
   media     PropertyMedia[]
