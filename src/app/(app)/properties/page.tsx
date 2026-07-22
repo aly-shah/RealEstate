@@ -123,9 +123,8 @@ export default async function PropertiesPage({
                 <Td className="text-xs text-muted">{p._count.leads} leads · {p._count.agents} agents</Td>
                 <Td className="text-end">
                   <QuickShareButton
-                    propertyId={p.id}
                     reference={p.reference}
-                    enabled={p.shareEnabled}
+                    title={p.title}
                     slug={p.shareSlug}
                   />
                 </Td>

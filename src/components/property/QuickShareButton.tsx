@@ -3,34 +3,37 @@
 import { useState } from "react";
 import { Icon } from "@/components/ui/Icon";
 import { Drawer } from "@/components/ui/Drawer";
-import { ShareProperty } from "./ShareProperty";
+import { ShareButton } from "./ShareButton";
 
 interface QuickShareButtonProps {
-  propertyId: string;
   reference: string;
-  enabled: boolean;
+  title: string;
   slug: string | null;
 }
 
 /**
- * Row-level "share" affordance on the properties list. Opens the same share
- * controls used on the detail page inside a right-side drawer — so an agent can
- * turn on a public link and copy/WhatsApp it without leaving the list.
+ * Row-level "share" affordance on the properties list. Every listing has a
+ * public page from creation, so there's no on/off step — this just opens the
+ * copy / WhatsApp controls in a right-side drawer.
  */
-export function QuickShareButton({ propertyId, reference, enabled, slug }: QuickShareButtonProps) {
+export function QuickShareButton({ reference, title, slug }: QuickShareButtonProps) {
   const [open, setOpen] = useState(false);
   return (
     <>
       <button
         onClick={() => setOpen(true)}
         aria-label={`Share ${reference}`}
-        title={enabled ? "Share link is on" : "Share with client"}
-        className={`btn-ghost h-8 w-8 p-0 ${enabled ? "text-accent" : ""}`}
+        title="Share this property"
+        className="btn-ghost h-8 w-8 p-0"
       >
         <Icon name="share" className="h-4 w-4" />
       </button>
-      <Drawer open={open} onClose={() => setOpen(false)} title="Share with client" description={reference} width="md">
-        <ShareProperty propertyId={propertyId} enabled={enabled} slug={slug} />
+      <Drawer open={open} onClose={() => setOpen(false)} title="Share this property" description={reference} width="md">
+        {slug ? (
+          <ShareButton slug={slug} title={title} reference={reference} />
+        ) : (
+          <p className="text-sm text-muted">Public link is being prepared…</p>
+        )}
       </Drawer>
     </>
   );
