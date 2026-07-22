@@ -18,7 +18,6 @@ const OFFICE: Role[] = ["OWNER", "ADMIN"];
 export const NAV: NavItem[] = [
   { href: "/dashboard",     label: "Dashboard",     icon: "dashboard",  roles: ALL,                          group: "workspace" },
   { href: "/properties",    label: "Properties",    icon: "home",       roles: ALL,                          group: "workspace" },
-  { href: "/projects",      label: "Projects",      icon: "building",   roles: ALL,                          group: "workspace" },
   { href: "/map",           label: "Map",           icon: "map-pin",    roles: ALL,                          group: "workspace" },
 
   { href: "/leads",         label: "Leads",         icon: "target",     roles: ["OWNER", "ADMIN", "AGENT"], group: "sales" },
