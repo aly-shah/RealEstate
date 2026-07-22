@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import type { Prisma } from "@prisma/client";
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { money, compactMoney, humanize, fmtDate } from "@/lib/format";
@@ -150,36 +151,61 @@ function Fact({ label, value }: { label: string; value: React.ReactNode }) {
 
 /** Sibling listings for "You may also like". Scoped to the same company (so the
  *  tenant guard passes) and to publicly-shared, photographed listings only. */
-async function getRelated(companyId: string, excludeId: string) {
-  const rows = await prisma.property.findMany({
-    where: {
-      companyId,
-      shareEnabled: true,
-      id: { not: excludeId },
-      shareSlug: { not: null },
-      media: { some: { kind: "PHOTO" } },
-    },
+const RELATED_SELECT = {
+  id: true,
+  reference: true,
+  title: true,
+  type: true,
+  listingType: true,
+  city: true,
+  area: true,
+  salePrice: true,
+  monthlyRent: true,
+  bedrooms: true,
+  bathrooms: true,
+  coveredArea: true,
+  areaUnit: true,
+  shareSlug: true,
+  media: { where: { kind: "PHOTO" }, orderBy: { createdAt: "asc" }, take: 1, select: { id: true } },
+} as const;
+
+const RELATED_LIMIT = 3;
+
+/**
+ * Sibling listings for "You may also like". Scoped to the same company (so the
+ * tenant guard passes) and to publicly-shared listings only. Photos are NOT
+ * required — a listing without one just renders a placeholder card, so a whole
+ * inventory that hasn't been photographed yet still cross-links. Relevance is
+ * layered: same area first (e.g. other units in the same tower/society), then
+ * same city, then anything else — de-duped and capped.
+ */
+async function getRelated(companyId: string, excludeId: string, area: string | null, city: string | null) {
+  const base = { companyId, shareEnabled: true, shareSlug: { not: null }, id: { not: excludeId } };
+  const tiers = [
+    area ? { ...base, area } : null,
+    city ? { ...base, city } : null,
+    base,
+  ];
+
+  const picked = new Map<string, Awaited<ReturnType<typeof queryTier>>[number]>();
+  for (const where of tiers) {
+    if (!where || picked.size >= RELATED_LIMIT) continue;
+    const rows = await queryTier(where);
+    for (const r of rows) {
+      if (!picked.has(r.id)) picked.set(r.id, r);
+      if (picked.size >= RELATED_LIMIT) break;
+    }
+  }
+  return [...picked.values()].slice(0, RELATED_LIMIT);
+}
+
+function queryTier(where: Prisma.PropertyWhereInput) {
+  return prisma.property.findMany({
+    where,
     orderBy: { createdAt: "desc" },
-    take: 3,
-    select: {
-      id: true,
-      reference: true,
-      title: true,
-      type: true,
-      listingType: true,
-      city: true,
-      area: true,
-      salePrice: true,
-      monthlyRent: true,
-      bedrooms: true,
-      bathrooms: true,
-      coveredArea: true,
-      areaUnit: true,
-      shareSlug: true,
-      media: { where: { kind: "PHOTO" }, orderBy: { createdAt: "asc" }, take: 1, select: { id: true } },
-    },
+    take: RELATED_LIMIT * 2,
+    select: RELATED_SELECT,
   });
-  return rows;
 }
 
 type Related = Awaited<ReturnType<typeof getRelated>>[number];
@@ -255,7 +281,7 @@ export default async function PublicPropertyPage({
     p.sharedById
       ? prisma.user.findUnique({ where: { id: p.sharedById }, select: { name: true, phone: true } })
       : Promise.resolve(null),
-    getRelated(p.companyId, p.id),
+    getRelated(p.companyId, p.id, p.area, p.city),
   ]);
 
   const location = [p.area, p.city].filter(Boolean).join(", ");
