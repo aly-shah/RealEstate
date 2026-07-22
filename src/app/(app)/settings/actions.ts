@@ -69,6 +69,91 @@ export async function createUser(_prev: FormState, formData: FormData): Promise<
   return { ok: true };
 }
 
+// Edit reuses the create fields but the password is optional (blank = keep the
+// current one) and a userId identifies the target.
+const userEditSchema = z.object({
+  userId: z.string().min(1),
+  name: z.string().min(2, "Name is required"),
+  email: z.string().email("Valid email required"),
+  role: z.enum(["ADMIN", "AGENT", "DEALER"]),
+  phone: z.string().optional(),
+  password: z.preprocess(
+    (v) => (v === "" || v == null ? undefined : v),
+    z.string().min(6, "Min 6 characters").optional(),
+  ),
+});
+
+/**
+ * Edit an existing team member's profile — name, email, phone, role, and
+ * (optionally) a reset password. Hardened the same way as setUserStatus:
+ *  - manage-users capability required,
+ *  - target must be in the same company,
+ *  - SUPER_ADMIN and OWNER are never editable here (platform / account owner),
+ *  - email stays unique across the platform.
+ * Changing a member to DEALER mints the matching dealer profile (mirrors
+ * createUser) so inventory can be attributed to them; changing away leaves any
+ * existing dealer profile untouched so its linked listings aren't orphaned.
+ */
+export async function updateUser(_prev: FormState, formData: FormData): Promise<FormState> {
+  const actor = await requireCompanyUser();
+  if (!can(actor.role, "manageUsers")) return { error: "Not allowed." };
+
+  const parsed = userEditSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
+  const d = parsed.data;
+
+  const target = await prisma.user.findFirst({
+    where: { id: d.userId, companyId: actor.companyId },
+    select: { id: true, role: true, email: true },
+  });
+  if (!target) return { error: "User not found." };
+  if (target.role === "SUPER_ADMIN" || target.role === "OWNER") {
+    return { error: "This account's profile can't be edited here." };
+  }
+
+  const email = d.email.toLowerCase();
+  if (email !== target.email) {
+    const clash = await prisma.user.findUnique({ where: { email } });
+    if (clash && clash.id !== target.id) return { error: "That email is already in use." };
+  }
+
+  await prisma.user.update({
+    where: { id: target.id },
+    data: {
+      name: d.name,
+      email,
+      role: d.role,
+      phone: d.phone || null,
+      ...(d.password ? { passwordHash: await bcrypt.hash(d.password, 10) } : {}),
+    },
+  });
+
+  // New dealer login needs a dealer profile so listings can attribute to them
+  // (only create if one doesn't already exist).
+  if (d.role === "DEALER") {
+    const existingDealer = await prisma.dealer.findFirst({ where: { userId: target.id }, select: { id: true } });
+    if (!existingDealer) {
+      await prisma.dealer.create({
+        data: { companyId: actor.companyId, userId: target.id, name: d.name, contact: d.phone || null },
+      });
+    }
+  }
+
+  // Role/status is cached (60s TTL) — drop it so the change takes effect now.
+  invalidateUserStatus(target.id);
+  await logActivity({
+    companyId: actor.companyId,
+    userId: actor.id,
+    action: "user.updated",
+    entityType: "USER",
+    entityId: target.id,
+    summary: `Updated ${d.role.toLowerCase()} ${d.name}`,
+  });
+
+  revalidatePath("/settings");
+  return { ok: true };
+}
+
 /**
  * Toggle a user between ACTIVE and SUSPENDED. Hardened against:
  *  - self-suspension (would lock the actor out of the company)

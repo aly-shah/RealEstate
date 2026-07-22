@@ -10,6 +10,7 @@ import { StatusBadge } from "@/components/ui/Badge";
 import {
   CommissionRuleForm,
   NewUserForm,
+  EditUserButton,
   BrandingForm,
   IntegrationsForm,
   LeadRoutingForm,
@@ -208,6 +209,7 @@ export default async function SettingsPage() {
             const isSelf = u.id === user.id;
             const isSuperAdmin = u.role === "SUPER_ADMIN";
             const canToggle = !isSelf && !isSuperAdmin;
+            const canEdit = !isSuperAdmin && u.role !== "OWNER";
             const nextStatus = u.status === "ACTIVE" ? "SUSPENDED" : "ACTIVE";
             return (
               <tr key={u.id} className="hover:bg-line-soft">
@@ -219,17 +221,22 @@ export default async function SettingsPage() {
                 <Td>{ROLE_LABELS[u.role]}</Td>
                 <Td><StatusBadge status={u.status} /></Td>
                 <Td>
-                  {canToggle ? (
-                    <form action={setUserStatus}>
-                      <input type="hidden" name="userId" value={u.id} />
-                      <input type="hidden" name="status" value={nextStatus} />
-                      <button className="btn-ghost px-2 py-1 text-xs">
-                        {u.status === "ACTIVE" ? "Suspend" : "Reactivate"}
-                      </button>
-                    </form>
-                  ) : (
-                    <span className="text-xs text-muted">—</span>
-                  )}
+                  <div className="flex items-center justify-end gap-1">
+                    {canEdit && (
+                      <EditUserButton user={{ id: u.id, name: u.name, email: u.email, role: u.role, phone: u.phone }} />
+                    )}
+                    {canToggle ? (
+                      <form action={setUserStatus}>
+                        <input type="hidden" name="userId" value={u.id} />
+                        <input type="hidden" name="status" value={nextStatus} />
+                        <button className="btn-ghost px-2 py-1 text-xs">
+                          {u.status === "ACTIVE" ? "Suspend" : "Reactivate"}
+                        </button>
+                      </form>
+                    ) : (
+                      !canEdit && <span className="text-xs text-muted">—</span>
+                    )}
+                  </div>
                 </Td>
               </tr>
             );

@@ -4,6 +4,7 @@ import { useActionState } from "react";
 import { useState, useTransition } from "react";
 import {
   createUser,
+  updateUser,
   updateCommissionRule,
   updateCompanyBranding,
   updateIntegrations,
@@ -12,6 +13,7 @@ import {
   type FormState,
 } from "./actions";
 import { syncWhatsappTemplates } from "./whatsapp-actions";
+import { Drawer } from "@/components/ui/Drawer";
 
 const ROUTING_OPTIONS = [
   { value: "MANUAL", label: "Manual — office triages from the leads list (default)" },
@@ -145,6 +147,63 @@ export function NewUserForm() {
       {state.ok && <p className="text-sm text-ok">User created.</p>}
       <button type="submit" disabled={pending} className="btn-primary">{pending ? "Creating…" : "Add user"}</button>
     </form>
+  );
+}
+
+export interface EditableUser {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  phone: string | null;
+}
+
+/**
+ * "Edit" affordance in the Users table. Opens a drawer with the member's
+ * profile pre-filled; the password field is optional (blank keeps the current
+ * one). Submits updateUser and closes the drawer on success.
+ */
+export function EditUserButton({ user }: { user: EditableUser }) {
+  const [open, setOpen] = useState(false);
+  const [state, action, pending] = useActionState<FormState, FormData>(async (p, fd) => {
+    const res = await updateUser(p, fd);
+    if (res.ok) setOpen(false);
+    return res;
+  }, {});
+
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)} className="btn-ghost px-2 py-1 text-xs">
+        Edit
+      </button>
+      <Drawer open={open} onClose={() => setOpen(false)} title="Edit team member" description={user.email} width="md">
+        <form action={action} className="space-y-4">
+          <input type="hidden" name="userId" value={user.id} />
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div><label className="label" htmlFor="edit-name">Name</label><input id="edit-name" name="name" className="field" defaultValue={user.name} required /></div>
+            <div><label className="label" htmlFor="edit-email">Email</label><input id="edit-email" name="email" type="email" className="field" defaultValue={user.email} required /></div>
+            <div><label className="label" htmlFor="edit-phone">Phone</label><input id="edit-phone" name="phone" className="field" defaultValue={user.phone ?? ""} /></div>
+            <div>
+              <label className="label" htmlFor="edit-role">Role</label>
+              <select id="edit-role" name="role" className="field" defaultValue={user.role}>
+                <option value="AGENT">Agent</option>
+                <option value="ADMIN">Admin</option>
+                <option value="DEALER">Dealer</option>
+              </select>
+            </div>
+            <div className="sm:col-span-2">
+              <label className="label" htmlFor="edit-password">New password</label>
+              <input id="edit-password" name="password" type="text" className="field" minLength={6} placeholder="Leave blank to keep current password" />
+            </div>
+          </div>
+          {state.error && <p className="text-sm text-danger">{state.error}</p>}
+          <div className="flex gap-2">
+            <button type="submit" disabled={pending} className="btn-primary">{pending ? "Saving…" : "Save changes"}</button>
+            <button type="button" onClick={() => setOpen(false)} className="btn-ghost">Cancel</button>
+          </div>
+        </form>
+      </Drawer>
+    </>
   );
 }
 
